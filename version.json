@@ -1,14 +1,15 @@
 {
-  "build": "deep-cache-22425",
-  "childFiles": 22425,
+  "build": "deep-cache-32456",
+  "childFiles": 32456,
   "zipHint": "upload C:/Users/Administrator/Desktop/网课-netlify.zip",
-  "updatedAt": "2026-06-16T11:42:39.950Z",
+  "updatedAt": "2026-06-16T12:15:33.815Z",
   "yydocxFilled": {
-    "done": 5031,
+    "done": 10031,
     "failed": 0,
-    "written": 5031,
-    "nonempty": 5030,
-    "discovered": 229626,
-    "maxWrites": 5000
+    "written": 10031,
+    "nonempty": 10024,
+    "discovered": 415109,
+    "maxWrites": 10000,
+    "cumulativeWritten": 15062
   }
 }
