@@ -1,8 +1,8 @@
 {
-  "build": "deep-cache-130895",
-  "childFiles": 130895,
+  "build": "deep-cache-130896",
+  "childFiles": 130896,
   "zipHint": "upload C:/Users/Administrator/Desktop/网课-netlify.zip",
-  "updatedAt": "2026-06-16T16:09:16.781Z",
+  "updatedAt": "2026-06-16T23:02:22.020Z",
   "yydocxFilled": {
     "writtenLatest": 1869,
     "failedLatest": 1899,
@@ -18,15 +18,16 @@
     "updatedAt": "2026-06-16T15:20:20.118Z"
   },
   "fullAudit": {
-    "childFiles": 130895,
+    "childFiles": 130896,
     "yydocxMissing": 0,
     "dirtsDynamicMissing": 29740,
     "emptyYydocxMapped": 0,
+    "allowedEmptyRootFolders": 1,
     "missingChildFileRefs": 0,
-    "shownFolders": 160636,
+    "shownFolders": 160637,
     "totalRecords": 3143282,
     "dataSizeMB": 279.16,
-    "updatedAt": "2026-06-16T16:10:37.393Z",
+    "updatedAt": "2026-06-16T23:02:22.020Z",
     "dataScope": "data directory"
   },
   "dirtsDirectVerified": {
@@ -36,14 +37,15 @@
     "updatedAt": "2026-06-16T15:33:52.614Z"
   },
   "emptyYydocxPruned": {
-    "removedChildFiles": 13573,
-    "deletedFiles": 13573,
+    "removedChildFiles": 13572,
+    "deletedFiles": 13572,
     "retainedSharedEmptyFiles": 0,
-    "markedRecords": 13573,
+    "markedRecords": 13572,
     "markedSearchRecords": 2,
     "changedInlineEntries": 0,
     "changedChildFiles": 1614,
     "unreadable": 0,
-    "updatedAt": "2026-06-16T16:09:16.781Z"
+    "updatedAt": "2026-06-16T23:00:07.934Z",
+    "allowedEmptyRootFolders": 1
   }
 }

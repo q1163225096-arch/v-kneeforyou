@@ -31,6 +31,14 @@ function recordKey(record) {
   return `${record?.pathId}:${record?.associationFileId || record?.id || ""}`;
 }
 
+function recordName(record) {
+  return record?.title || record?.displayName || record?.associationFileName || record?.serverFileName || record?.name || "";
+}
+
+function isAllowedEmptyRoot(record) {
+  return isDir(record) && /^\d+$/.test(String(recordName(record)));
+}
+
 function compactKey(item) {
   if (!Array.isArray(item)) return "";
   return `${item[5] || ""}:${item[1] || ""}`;
@@ -75,6 +83,7 @@ const originalChildFiles = { ...site.childFiles };
 const relToKeys = new Map();
 const emptyKeys = new Set();
 const emptyFiles = new Map();
+const allowedEmptyRootKeys = new Set((site.root || []).filter(isAllowedEmptyRoot).map(recordKey));
 let unreadable = 0;
 
 for (const [key, relativeFile] of Object.entries(originalChildFiles)) {
@@ -85,7 +94,7 @@ for (const [key, relativeFile] of Object.entries(originalChildFiles)) {
   if (key.startsWith("dirts:")) continue;
   try {
     const entry = loadJson(childPath(relativeFile));
-    if (Array.isArray(entry.data) && entry.data.length === 0) {
+    if (Array.isArray(entry.data) && entry.data.length === 0 && !allowedEmptyRootKeys.has(key)) {
       emptyKeys.add(key);
       emptyFiles.set(key, relativeFile);
     }

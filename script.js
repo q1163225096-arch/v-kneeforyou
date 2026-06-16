@@ -120,7 +120,12 @@
     return Boolean((cached && Array.isArray(cached.data) && (cached.data.length > 0 || cached.more)) || childFiles[key]);
   }
 
+  function isAllowedEmptyFolder(record) {
+    return rootRecords.includes(record) && /^\d+$/.test(getName(record));
+  }
+
   function hasEmptyCachedChildren(record) {
+    if (isAllowedEmptyFolder(record)) return false;
     const key = getKey(record);
     const cached = childrenMap[key];
     return Boolean(cached && Array.isArray(cached.data) && cached.data.length === 0 && !cached.more);
@@ -434,7 +439,7 @@
       render();
       return;
     }
-    if (Array.isArray(entry.data) && entry.data.length === 0 && !entry.more) {
+    if (Array.isArray(entry.data) && entry.data.length === 0 && !entry.more && !isAllowedEmptyFolder(record)) {
       record.isDir = 0;
       if ("isdir" in record) record.isdir = 0;
       showToast("\u5df2\u7ecf\u662f\u6700\u540e\u4e00\u7ea7");
