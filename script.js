@@ -4,6 +4,8 @@
   const childrenMap = data.children || {};
   const childFiles = data.childFiles || {};
   const PAGE_SIZE = 500;
+  const fileLikeExtensionPattern =
+    /\.(?:mp4|m4v|mov|avi|mkv|wmv|flv|webm|mp3|m4a|wav|flac|aac|ogg|zip|rar|7z|tar|gz|pdf|doc|docx|xls|xlsx|ppt|pptx|txt|md|csv|json|html|htm|jpg|jpeg|png|gif|webp|svg|psd|ai|prproj|aep|exe|apk|dmg|iso)(?:$|[?#\s])/i;
 
   const state = {
     stack: [],
@@ -102,6 +104,24 @@
     return `${record.pathId}:${record.associationFileId || record.id || ""}`;
   }
 
+  function hasCachedChildren(record) {
+    const key = getKey(record);
+    const cached = childrenMap[key];
+    return Boolean((cached && Array.isArray(cached.data)) || childFiles[key]);
+  }
+
+  function looksLikeFile(record) {
+    const name = getName(record);
+    const pathTail = String(getPath(record)).split(/[\\/]/).pop();
+    return fileLikeExtensionPattern.test(`${name} ${pathTail}`);
+  }
+
+  function isFolderRecord(record) {
+    if (!record || !record.isDir) return false;
+    if (hasCachedChildren(record)) return true;
+    return !looksLikeFile(record);
+  }
+
   function normalize(value) {
     return String(value || "").replace(/\s+/g, "").toLowerCase();
   }
@@ -116,8 +136,19 @@
     return state.stack[state.stack.length - 1];
   }
 
-  function canUseApi() {
+  function canUseStaticFiles() {
     return window.location.protocol !== "file:";
+  }
+
+  function canUseRemoteApi() {
+    if (window.location.protocol === "file:") return false;
+    const hostname = window.location.hostname;
+    return (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname.endsWith(".netlify.app") ||
+      hostname.endsWith(".netlify.com")
+    );
   }
 
   function currentRecords() {
@@ -146,7 +177,7 @@
     if (localSearchRecordsPromise) return localSearchRecordsPromise;
 
     localSearchRecordsPromise = (async () => {
-      if (canUseApi()) {
+      if (canUseStaticFiles()) {
         try {
           const response = await fetch("./data/search-index.json");
           if (response.ok) {
@@ -170,8 +201,8 @@
       state.scope === "current" && currentFolder() ? normalize(getPath(currentFolder().record)) : "";
 
     return records.filter((record) => {
-      if (state.type === "dir" && !record.isDir) return false;
-      if (state.type === "file" && record.isDir) return false;
+      if (state.type === "dir" && !isFolderRecord(record)) return false;
+      if (state.type === "file" && isFolderRecord(record)) return false;
       if (scopePath && !normalize(getPath(record)).includes(scopePath)) return false;
       if (!needle || matchesSiteKeyword) return true;
       return normalize(`${getName(record)} ${getPath(record)}`).includes(needle);
@@ -193,8 +224,8 @@
 
     const needle = normalize(state.query);
     const filtered = source.filter((record) => {
-      if (state.type === "dir" && !record.isDir) return false;
-      if (state.type === "file" && record.isDir) return false;
+      if (state.type === "dir" && !isFolderRecord(record)) return false;
+      if (state.type === "file" && isFolderRecord(record)) return false;
       if (!state.searching || !needle) return true;
       return normalize(`${getName(record)} ${getPath(record)}`).includes(needle);
     });
@@ -234,7 +265,7 @@
     const cached = childrenMap[key];
     if (cached && Array.isArray(cached.data)) return cached;
 
-    if (childFiles[key] && canUseApi()) {
+    if (childFiles[key] && canUseStaticFiles()) {
       state.loading = true;
       render();
       try {
@@ -259,9 +290,12 @@
       }
     }
 
-    if (!canUseApi()) {
-      showToast("请用本地服务地址打开，才能继续加载这个目录");
-      return null;
+    if (!canUseRemoteApi()) {
+      const entry = { data: [], more: false, page: 1, pageSize: PAGE_SIZE };
+      childrenMap[key] = entry;
+      invalidateIndexCache();
+      showToast("\u5df2\u7ecf\u662f\u6700\u540e\u4e00\u7ea7");
+      return entry;
     }
 
     state.loading = true;
@@ -372,7 +406,7 @@
     }
 
     const folder = currentFolder();
-    if (!folder || !canUseApi()) return;
+    if (!folder || !canUseRemoteApi()) return;
     const entry = childrenMap[folder.key];
     if (!entry || !entry.more) return;
 
@@ -447,7 +481,7 @@
     const rows = records
       .map((record, index) => {
         const name = getName(record);
-        const folder = !!record.isDir;
+        const folder = isFolderRecord(record);
         const key = `${getKey(record)}:${index}`;
         return `
           <div class="file-row ${folder ? "is-folder" : ""}" data-index="${index}" data-key="${escapeHtml(key)}">
@@ -539,7 +573,7 @@
     if (!row) return;
     const record = state.renderedRecords[Number(row.dataset.index)];
     if (!record) return;
-    if (record.isDir) {
+    if (isFolderRecord(record)) {
       await openFolder(record);
       return;
     }
@@ -563,7 +597,7 @@
   });
 
   document.title = data.info && data.info.title ? data.info.title : document.title;
-  if (!canUseApi() && elements.serverBanner) {
+  if (!canUseStaticFiles() && elements.serverBanner) {
     elements.serverBanner.classList.remove("is-hidden");
   }
   render();

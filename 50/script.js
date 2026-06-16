@@ -3,6 +3,8 @@
   const rootRecords = Array.isArray(data.root) ? data.root : [];
   const childrenMap = data.children || {};
   const PAGE_SIZE = 500;
+  const fileLikeExtensionPattern =
+    /\.(?:mp4|m4v|mov|avi|mkv|wmv|flv|webm|mp3|m4a|wav|flac|aac|ogg|zip|rar|7z|tar|gz|pdf|doc|docx|xls|xlsx|ppt|pptx|txt|md|csv|json|html|htm|jpg|jpeg|png|gif|webp|svg|psd|ai|prproj|aep|exe|apk|dmg|iso)(?:$|[?#\s])/i;
 
   const state = {
     stack: [],
@@ -41,8 +43,19 @@
       <path d="M25 38h30M25 50h30M25 26h14" stroke="#6F82FF" stroke-width="4" stroke-linecap="round"/>
     </svg>`;
 
-  function canUseApi() {
+  function canUseStaticFiles() {
     return window.location.protocol !== "file:";
+  }
+
+  function canUseRemoteApi() {
+    if (window.location.protocol === "file:") return false;
+    const hostname = window.location.hostname;
+    return (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname.endsWith(".netlify.app") ||
+      hostname.endsWith(".netlify.com")
+    );
   }
 
   function keyFor(record) {
@@ -51,6 +64,22 @@
 
   function nameOf(record) {
     return record.displayName || record.alias || record.serverFileName || record.name || "未命名";
+  }
+
+  function hasCachedChildren(record) {
+    return Array.isArray(childrenMap[keyFor(record)]);
+  }
+
+  function looksLikeFile(record) {
+    const name = nameOf(record);
+    const pathTail = String(record.path || "").split(/[\\/]/).pop();
+    return fileLikeExtensionPattern.test(`${name} ${pathTail}`);
+  }
+
+  function isFolderRecord(record) {
+    if (!record || !record.isDir) return false;
+    if (hasCachedChildren(record)) return true;
+    return !looksLikeFile(record);
   }
 
   function currentFolder() {
@@ -94,9 +123,10 @@
     const key = keyFor(record);
     if (Array.isArray(childrenMap[key])) return childrenMap[key];
 
-    if (!canUseApi()) {
-      showToast("请打开本地服务地址后继续进入深层目录");
-      return null;
+    if (!canUseRemoteApi()) {
+      childrenMap[key] = [];
+      showToast("\u5df2\u7ecf\u662f\u6700\u540e\u4e00\u7ea7");
+      return childrenMap[key];
     }
 
     state.loading = true;
@@ -120,7 +150,7 @@
   }
 
   async function openRecord(record) {
-    if (!record || !record.isDir) {
+    if (!isFolderRecord(record)) {
       showToast(record && record.path ? record.path : "暂无可进入内容");
       return;
     }
@@ -171,7 +201,7 @@
     elements.empty.classList.toggle("is-hidden", records.length > 0);
     elements.list.innerHTML = records
       .map((record, index) => {
-        const isFolder = !!record.isDir;
+        const isFolder = isFolderRecord(record);
         return `
           <button class="file-row ${isFolder ? "is-folder" : ""}" type="button" data-index="${index}">
             ${isFolder ? folderIcon : fileIcon}
@@ -217,6 +247,6 @@
   });
 
   document.title = data.info && data.info.title ? data.info.title : document.title;
-  if (!canUseApi()) elements.serverBanner.classList.remove("is-hidden");
+  if (!canUseStaticFiles()) elements.serverBanner.classList.remove("is-hidden");
   render();
 })();
