@@ -1,15 +1,33 @@
 {
-  "build": "deep-cache-32456",
-  "childFiles": 32456,
+  "build": "deep-cache-144468",
+  "childFiles": 144468,
   "zipHint": "upload C:/Users/Administrator/Desktop/网课-netlify.zip",
-  "updatedAt": "2026-06-16T12:15:33.815Z",
+  "updatedAt": "2026-06-16T15:20:20.119Z",
   "yydocxFilled": {
-    "done": 10031,
-    "failed": 0,
-    "written": 10031,
-    "nonempty": 10024,
-    "discovered": 415109,
-    "maxWrites": 10000,
-    "cumulativeWritten": 15062
+    "writtenLatest": 1869,
+    "failedLatest": 1899,
+    "note": "Final yydocx audit is zero missing; failed latest were upstream 400 leaves marked as leaf records.",
+    "maxWrites": 6000
+  },
+  "repairedMissingChildFiles": {
+    "removed": 750
+  },
+  "yydocxLeafCorrections": {
+    "markedAsLeaf": 1899,
+    "files": 593,
+    "updatedAt": "2026-06-16T15:20:20.118Z"
+  },
+  "fullAudit": {
+    "childFiles": 144468,
+    "yydocxMissing": 0,
+    "dirtsDynamicMissing": 29740,
+    "dataSizeMB": 281.23,
+    "updatedAt": "2026-06-16T15:33:52.614Z"
+  },
+  "dirtsDirectVerified": {
+    "path": "50 > 会员分区 > 建模设计区 > C4D _ AE 商业产品动画班",
+    "rows": 40,
+    "mode": "direct browser request on non-localhost origin",
+    "updatedAt": "2026-06-16T15:33:52.614Z"
   }
 }

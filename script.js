@@ -7,7 +7,7 @@
   const DIRTS_DIRECT_URL = "https://path.dirts.cn/suda/server/front/business/path/file/list";
   const DIRTS_DIRECT_AUTH = "65516aa4f5cc9c2681bf791c4593020c679ca8a6165030a6c26429ebac1dc2f4";
   const fileLikeExtensionPattern =
-    /\.(?:mp4|m4v|mov|avi|mkv|wmv|flv|webm|mp3|m4a|wav|flac|aac|ogg|zip|rar|7z|tar|gz|pdf|doc|docx|xls|xlsx|ppt|pptx|txt|md|csv|json|html|htm|jpg|jpeg|png|gif|webp|svg|psd|ai|prproj|aep|exe|apk|dmg|iso)(?:$|[?#\s])/i;
+    /\.(?:mp4|m4v|mov|avi|mkv|wmv|flv|webm|mp3|m4a|wav|flac|aac|ogg|zip|rar|7z|tar|gz|pdf|doc|docx|xls|xlsx|xlsm|ppt|pptx|txt|md|csv|json|html|htm|jpg|jpeg|png|gif|webp|svg|psd|ai|prproj|aep|exe|apk|dmg|iso|cube|mb|ds_store|ttc|otf|rbz|mmap|tsdownloading|dbf|prj|sbn|sbx|shp|shx|jar|hdr|cpg|fbx|jmx|pst|drawio|rpm|octet-stream|wedrive|\d+)(?:$|[?#\s])/i;
 
   const state = {
     stack: [],
@@ -99,6 +99,14 @@
     return pathCache.get(record);
   }
 
+  function joinRecordPath(parent, name) {
+    const base = getPath(parent);
+    const cleanName = String(name || "").replace(/^\/+/, "");
+    if (!cleanName) return base || "/";
+    if (!base || base === "/") return `/${cleanName}`;
+    return `${base.replace(/\/+$/, "")}/${cleanName}`;
+  }
+
   function getKey(record) {
     if (record.provider === "dirts") {
       return `dirts:${record.rootId || record.id}:${record.path || ""}`;
@@ -155,6 +163,44 @@
 
   function canUseDirtsDirect(record) {
     return record && record.provider === "dirts" && window.location.protocol !== "file:";
+  }
+
+  function expandCompactEntry(parent, entry) {
+    if (!entry || entry.format !== "yyc1" || !Array.isArray(entry.data)) return entry;
+    const parentPathId = parent && parent.pathId;
+    const data = entry.data.map((item) => {
+      if (!Array.isArray(item)) return item;
+      const name = item[0] || "未命名";
+      return {
+        associationFileName: name,
+        associationFilePath: joinRecordPath(parent, name),
+        associationFileId: item[1] || "",
+        associationType: 1,
+        category: item[3] || 0,
+        isDir: item[2] ? 1 : 0,
+        pathId: item[5] || parentPathId,
+        size: item[4] || 0,
+      };
+    });
+    return {
+      data,
+      more: Boolean(entry.more),
+      page: entry.page || 1,
+      pageSize: entry.pageSize || PAGE_SIZE,
+    };
+  }
+
+  function normalizeStaticEntry(parent, json) {
+    if (Array.isArray(json)) {
+      return { data: json, more: false, page: 1, pageSize: PAGE_SIZE };
+    }
+    const compact = expandCompactEntry(parent, json);
+    return {
+      data: compact && Array.isArray(compact.data) ? compact.data : [],
+      more: Boolean(compact && compact.more),
+      page: (compact && compact.page) || 1,
+      pageSize: (compact && compact.pageSize) || PAGE_SIZE,
+    };
   }
 
   function currentRecords() {
@@ -289,14 +335,7 @@
         const response = await fetch(`./data/${childFiles[key]}`);
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
         const json = await response.json();
-        const entry = Array.isArray(json)
-          ? { data: json, more: false, page: 1, pageSize: PAGE_SIZE }
-          : {
-              data: Array.isArray(json.data) ? json.data : [],
-              more: Boolean(json.more),
-              page: json.page || 1,
-              pageSize: json.pageSize || PAGE_SIZE,
-            };
+        const entry = normalizeStaticEntry(record, json);
         childrenMap[key] = entry;
         invalidateIndexCache();
         return entry;

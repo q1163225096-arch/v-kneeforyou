@@ -107,6 +107,26 @@ function recordIsDir(record) {
   return record.isDir === 1 || record.isDir === true || record.isdir === 1 || record.isdir === true;
 }
 
+function expandCompactEntry(entry) {
+  if (!entry || entry.format !== "yyc1" || !Array.isArray(entry.data)) return entry;
+  return {
+    ...entry,
+    data: entry.data.map((item) => {
+      if (!Array.isArray(item)) return item;
+      return {
+        associationFileName: item[0] || "",
+        associationFilePath: "",
+        associationFileId: item[1] || "",
+        associationType: 1,
+        category: item[3] || 0,
+        isDir: item[2] ? 1 : 0,
+        pathId: item[5] || "",
+        size: item[4] || 0,
+      };
+    }),
+  };
+}
+
 function loadLocalSearchRecords() {
   if (localSearchCache) return localSearchCache;
 
@@ -123,7 +143,7 @@ function loadLocalSearchRecords() {
     const resolved = path.resolve(root, "data", relativeFile);
     if (!resolved.startsWith(path.resolve(root, "data"))) return;
     try {
-      const entry = JSON.parse(fs.readFileSync(resolved, "utf8"));
+      const entry = expandCompactEntry(JSON.parse(fs.readFileSync(resolved, "utf8")));
       if (entry && Array.isArray(entry.data)) records.push(...entry.data);
     } catch (error) {
       console.warn(`search cache skipped ${relativeFile}: ${error.message}`);
