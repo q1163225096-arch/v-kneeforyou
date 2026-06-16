@@ -3,6 +3,8 @@
   const rootRecords = Array.isArray(data.root) ? data.root : [];
   const childrenMap = data.children || {};
   const PAGE_SIZE = 500;
+  const DIRTS_DIRECT_URL = "https://path.dirts.cn/suda/server/front/business/path/file/list";
+  const DIRTS_DIRECT_AUTH = "65516aa4f5cc9c2681bf791c4593020c679ca8a6165030a6c26429ebac1dc2f4";
   const fileLikeExtensionPattern =
     /\.(?:mp4|m4v|mov|avi|mkv|wmv|flv|webm|mp3|m4a|wav|flac|aac|ogg|zip|rar|7z|tar|gz|pdf|doc|docx|xls|xlsx|ppt|pptx|txt|md|csv|json|html|htm|jpg|jpeg|png|gif|webp|svg|psd|ai|prproj|aep|exe|apk|dmg|iso)(?:$|[?#\s])/i;
 
@@ -92,10 +94,10 @@
     return Array.isArray(childrenMap[keyFor(folder)]) ? childrenMap[keyFor(folder)] : [];
   }
 
-  async function postJson(url, body) {
+  async function postJson(url, body, extraHeaders = {}) {
     const response = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...extraHeaders },
       body: JSON.stringify(body),
     });
     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
@@ -123,21 +125,19 @@
     const key = keyFor(record);
     if (Array.isArray(childrenMap[key])) return childrenMap[key];
 
-    if (!canUseRemoteApi()) {
-      childrenMap[key] = [];
-      showToast("\u5df2\u7ecf\u662f\u6700\u540e\u4e00\u7ea7");
-      return childrenMap[key];
-    }
-
     state.loading = true;
     render();
     try {
-      const rows = await postJson("./api/list", {
-        id: record.rootId || record.id,
-        path: record.path || "",
-        page: 1,
-        size: PAGE_SIZE,
-      });
+      const useDirect = !canUseRemoteApi() && canUseStaticFiles();
+      const rows = await postJson(
+        useDirect ? DIRTS_DIRECT_URL : "./api/list",
+        {
+          id: record.rootId || record.id,
+          path: record.path || "",
+          fsId: record.fsId || undefined,
+        },
+        useDirect ? { Authorization: DIRTS_DIRECT_AUTH } : {}
+      );
       childrenMap[key] = rows.map((item) => normalizeRemoteRecord(item, record));
       return childrenMap[key];
     } catch (error) {

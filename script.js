@@ -4,6 +4,8 @@
   const childrenMap = data.children || {};
   const childFiles = data.childFiles || {};
   const PAGE_SIZE = 500;
+  const DIRTS_DIRECT_URL = "https://path.dirts.cn/suda/server/front/business/path/file/list";
+  const DIRTS_DIRECT_AUTH = "65516aa4f5cc9c2681bf791c4593020c679ca8a6165030a6c26429ebac1dc2f4";
   const fileLikeExtensionPattern =
     /\.(?:mp4|m4v|mov|avi|mkv|wmv|flv|webm|mp3|m4a|wav|flac|aac|ogg|zip|rar|7z|tar|gz|pdf|doc|docx|xls|xlsx|ppt|pptx|txt|md|csv|json|html|htm|jpg|jpeg|png|gif|webp|svg|psd|ai|prproj|aep|exe|apk|dmg|iso)(?:$|[?#\s])/i;
 
@@ -151,6 +153,10 @@
     );
   }
 
+  function canUseDirtsDirect(record) {
+    return record && record.provider === "dirts" && window.location.protocol !== "file:";
+  }
+
   function currentRecords() {
     const folder = currentFolder();
     if (!folder) return rootRecords;
@@ -232,14 +238,16 @@
     return state.searching ? filtered.slice(0, 500) : filtered;
   }
 
-  async function postJson(url, body) {
+  async function postJson(url, body, extraHeaders = {}) {
     const response = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...extraHeaders },
       body: JSON.stringify(body),
     });
     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-    return response.json();
+    const json = await response.json();
+    if (json && Number(json.errorCode) > 0) throw new Error(json.msg || `errorCode ${json.errorCode}`);
+    return json;
   }
 
   function folderRequest(record, page, size) {
@@ -249,6 +257,7 @@
         size,
         id: record.rootId || record.id,
         path: record.path || "",
+        fsId: record.fsId || record.associationFileId || undefined,
       };
     }
 
@@ -257,6 +266,14 @@
       size,
       pathId: record.pathId,
       fileId: String(record.associationFileId || record.id || 0),
+    };
+  }
+
+  function dirtsDirectRequest(record) {
+    return {
+      id: record.rootId || record.id,
+      path: record.path || "",
+      fsId: record.fsId || record.associationFileId || undefined,
     };
   }
 
@@ -290,6 +307,28 @@
       }
     }
 
+    if (!canUseRemoteApi() && canUseDirtsDirect(record)) {
+      state.loading = true;
+      render();
+      try {
+        const json = await postJson(DIRTS_DIRECT_URL, dirtsDirectRequest(record), { Authorization: DIRTS_DIRECT_AUTH });
+        const entry = {
+          data: normalizeLoadedRecords(record, Array.isArray(json.data) ? json.data : Array.isArray(json.result) ? json.result : []),
+          more: false,
+          page: 1,
+          pageSize: PAGE_SIZE,
+        };
+        childrenMap[key] = entry;
+        invalidateIndexCache();
+        return entry;
+      } catch (error) {
+        showToast("\u52a0\u8f7d\u76ee\u5f55\u5931\u8d25");
+        return null;
+      } finally {
+        state.loading = false;
+      }
+    }
+
     if (!canUseRemoteApi()) {
       const entry = { data: [], more: false, page: 1, pageSize: PAGE_SIZE };
       childrenMap[key] = entry;
@@ -301,10 +340,13 @@
     state.loading = true;
     render();
     try {
-      const json = await postJson(record.provider === "dirts" ? "./api/dirts/list" : "./api/list", folderRequest(record, 1, PAGE_SIZE));
+      const json = await postJson(
+        record.provider === "dirts" ? "./api/dirts/list" : "./api/list",
+        record.provider === "dirts" ? dirtsDirectRequest(record) : folderRequest(record, 1, PAGE_SIZE)
+      );
       const entry = {
         data: normalizeLoadedRecords(record, Array.isArray(json.data) ? json.data : Array.isArray(json.result) ? json.result : []),
-        more: Boolean(json.more),
+        more: record.provider === "dirts" ? false : Boolean(json.more),
         page: 1,
         pageSize: PAGE_SIZE,
       };
@@ -406,7 +448,7 @@
     }
 
     const folder = currentFolder();
-    if (!folder || !canUseRemoteApi()) return;
+    if (!folder || (!canUseRemoteApi() && !canUseDirtsDirect(folder.record))) return;
     const entry = childrenMap[folder.key];
     if (!entry || !entry.more) return;
 
@@ -415,7 +457,12 @@
     try {
       const pageSize = entry.pageSize || (entry.more && entry.data && entry.data.length) || PAGE_SIZE;
       const nextPage = (entry.page || 1) + 1;
-      const json = await postJson(folder.record.provider === "dirts" ? "./api/dirts/list" : "./api/list", folderRequest(folder.record, nextPage, pageSize));
+      const useDirtsDirect = !canUseRemoteApi() && canUseDirtsDirect(folder.record);
+      const json = await postJson(
+        useDirtsDirect ? DIRTS_DIRECT_URL : folder.record.provider === "dirts" ? "./api/dirts/list" : "./api/list",
+        useDirtsDirect ? dirtsDirectRequest(folder.record) : folderRequest(folder.record, nextPage, pageSize),
+        useDirtsDirect ? { Authorization: DIRTS_DIRECT_AUTH } : {}
+      );
       const rows = normalizeLoadedRecords(folder.record, Array.isArray(json.data) ? json.data : Array.isArray(json.result) ? json.result : []);
       entry.data = entry.data.concat(rows);
       entry.more = Boolean(json.more);
