@@ -1,0 +1,2 @@
+/api/list /.netlify/functions/list 200
+/api/dirts/list /.netlify/functions/dirts-list 200

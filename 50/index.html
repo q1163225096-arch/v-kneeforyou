@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <title>1号网课目录</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="page">
+      <div class="layout-box">
+        <div class="server-banner is-hidden" id="serverBanner">
+          当前为离线预览，深层目录需要本地服务。
+          <a href="http://127.0.0.1:8751/">打开完整版本</a>
+        </div>
+
+        <section class="catalogue-card" aria-label="文件目录">
+          <nav class="breadcrumb is-hidden" id="breadcrumb" aria-label="当前位置"></nav>
+          <div class="list-shell">
+            <div class="empty-state is-hidden" id="emptyState">暂无数据</div>
+            <div class="file-list" id="fileList"></div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="./data/site-data.js"></script>
+    <script src="./script.js"></script>
+  </body>
+</html>
