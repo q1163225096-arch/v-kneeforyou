@@ -117,7 +117,13 @@
   function hasCachedChildren(record) {
     const key = getKey(record);
     const cached = childrenMap[key];
-    return Boolean((cached && Array.isArray(cached.data)) || childFiles[key]);
+    return Boolean((cached && Array.isArray(cached.data) && (cached.data.length > 0 || cached.more)) || childFiles[key]);
+  }
+
+  function hasEmptyCachedChildren(record) {
+    const key = getKey(record);
+    const cached = childrenMap[key];
+    return Boolean(cached && Array.isArray(cached.data) && cached.data.length === 0 && !cached.more);
   }
 
   function looksLikeFile(record) {
@@ -128,6 +134,7 @@
 
   function isFolderRecord(record) {
     if (!record || !record.isDir) return false;
+    if (hasEmptyCachedChildren(record)) return false;
     if (hasCachedChildren(record)) return true;
     return !looksLikeFile(record);
   }
@@ -424,6 +431,13 @@
   async function openFolder(record) {
     const entry = await ensureChildren(record);
     if (!entry) {
+      render();
+      return;
+    }
+    if (Array.isArray(entry.data) && entry.data.length === 0 && !entry.more) {
+      record.isDir = 0;
+      if ("isdir" in record) record.isdir = 0;
+      showToast("\u5df2\u7ecf\u662f\u6700\u540e\u4e00\u7ea7");
       render();
       return;
     }
