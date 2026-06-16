@@ -51,18 +51,24 @@
   "searchIndexRepairs": {
     "bangkeAdded": 2,
     "bangkeExpectedHits": 2,
-    "updatedAt": "2026-06-16T23:37:05.960Z",
+    "updatedAt": "2026-06-16T23:45:16.975Z",
     "bangkeRewrittenWithUnicode": true,
     "fullCachedFolderIndex": true,
     "foldersIndexed": 189795,
     "retainedFileRecords": 100,
-    "totalSearchRecords": 189895,
+    "totalSearchRecords": 3143282,
     "childFilesRead": 130896,
     "matchMode": "name-only",
     "includeInlineChildren": true,
     "includeDirtsFolders": true,
     "dirtsFoldersIndexed": 30785,
     "inlineEntriesRead": 1,
-    "unreadableChildFiles": 0
+    "unreadableChildFiles": 0,
+    "allCachedRecordsChunked": true,
+    "chunks": 32,
+    "chunkSize": 100000,
+    "filesIndexed": 2953487,
+    "dirtsRecordsIndexed": 33619,
+    "version": "20260617-7"
   }
 }

@@ -4,7 +4,8 @@
   const childrenMap = data.children || {};
   const childFiles = data.childFiles || {};
   const PAGE_SIZE = 500;
-  const SEARCH_INDEX_VERSION = "20260617-6";
+  const SEARCH_INDEX_VERSION = "20260617-7";
+  const SEARCH_MANIFEST_URL = `./data/search-manifest.json?v=${SEARCH_INDEX_VERSION}`;
   const DIRTS_DIRECT_URL = "https://path.dirts.cn/suda/server/front/business/path/file/list";
   const DIRTS_DIRECT_AUTH = "65516aa4f5cc9c2681bf791c4593020c679ca8a6165030a6c26429ebac1dc2f4";
   const fileLikeExtensionPattern =
@@ -73,6 +74,7 @@
   const pathCache = new WeakMap();
   let indexedRecordsCache = null;
   let localSearchRecordsPromise = null;
+  let searchManifestPromise = null;
 
   function replaceText(value) {
     return String(value || "").replace(replacementMatcher, "kneeforyou");
@@ -236,6 +238,93 @@
   function invalidateIndexCache() {
     indexedRecordsCache = null;
     localSearchRecordsPromise = null;
+    searchManifestPromise = null;
+  }
+
+  async function loadSearchManifest() {
+    if (!searchManifestPromise) {
+      searchManifestPromise = (async () => {
+        const response = await fetch(SEARCH_MANIFEST_URL);
+        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+        const manifest = await response.json();
+        if (!manifest || !Array.isArray(manifest.chunks)) throw new Error("invalid search manifest");
+        return manifest;
+      })();
+    }
+    return searchManifestPromise;
+  }
+
+  function getSearchItemName(item) {
+    if (!Array.isArray(item)) return getName(item);
+    return replaceText(item[0] === 1 ? item[1] : item[0]);
+  }
+
+  function getSearchItemIsFolder(item) {
+    if (!Array.isArray(item)) return isFolderRecord(item);
+    return Boolean(item[0] === 1 ? item[6] : item[2]);
+  }
+
+  function expandSearchItem(item) {
+    if (!Array.isArray(item)) return item;
+    if (item[0] === 1) {
+      return {
+        provider: "dirts",
+        title: item[1],
+        displayName: item[1],
+        associationFileName: item[1],
+        serverFileName: item[1],
+        associationFilePath: item[2] || "/",
+        path: item[2] || "/",
+        fsId: item[3] || null,
+        id: item[4],
+        rootId: item[5] || item[4],
+        isDir: item[6],
+        category: item[7] || 6,
+        size: item[8] || 0,
+      };
+    }
+    return {
+      title: item[0],
+      associationFileName: item[0],
+      associationFileId: item[1],
+      isDir: item[2],
+      category: item[3] || 0,
+      size: item[4] || 0,
+      pathId: item[5],
+      associationType: item[2] ? 1 : 0,
+    };
+  }
+
+  function searchItemMatches(item, needle, matchesSiteKeyword) {
+    const folder = getSearchItemIsFolder(item);
+    if (state.type === "dir" && !folder) return false;
+    if (state.type === "file" && folder) return false;
+    if (!needle || matchesSiteKeyword) return true;
+    return normalize(getSearchItemName(item)).includes(needle);
+  }
+
+  async function searchStaticChunks(limit) {
+    const manifest = await loadSearchManifest();
+    const needle = normalize(state.query);
+    const matchesSiteKeyword = isSiteKeywordSearch(needle);
+    const results = [];
+
+    for (const chunk of manifest.chunks) {
+      const response = await fetch(`./data/${chunk.file}?v=${SEARCH_INDEX_VERSION}`);
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      const json = await response.json();
+      const rows = Array.isArray(json) ? json : Array.isArray(json.data) ? json.data : [];
+
+      for (const item of rows) {
+        if (!searchItemMatches(item, needle, matchesSiteKeyword)) continue;
+        results.push(expandSearchItem(item));
+        if (results.length > limit) {
+          return { data: results.slice(0, limit), more: true };
+        }
+      }
+    }
+
+    return { data: results, more: false };
   }
 
   async function loadLocalSearchRecords() {
@@ -479,7 +568,16 @@
     state.loadingMore = append;
     render();
     try {
-      const source = await loadLocalSearchRecords();
+      if (canUseStaticFiles() && state.scope === "global") {
+        const limit = page * PAGE_SIZE;
+        const result = await searchStaticChunks(limit);
+        state.searchResults = result.data;
+        state.searchMore = result.more;
+        state.searchPage = page;
+        return;
+      }
+
+      const source = state.scope === "current" ? currentRecords() : await loadLocalSearchRecords();
       const filtered = filterRecords(source);
       const start = (page - 1) * PAGE_SIZE;
       const list = filtered.slice(start, start + PAGE_SIZE);
