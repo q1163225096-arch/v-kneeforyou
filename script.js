@@ -269,7 +269,7 @@
       if (state.type === "file" && isFolderRecord(record)) return false;
       if (scopePath && !normalize(getPath(record)).includes(scopePath)) return false;
       if (!needle || matchesSiteKeyword) return true;
-      return normalize(`${getName(record)} ${getPath(record)}`).includes(needle);
+      return normalize(getName(record)).includes(needle);
     });
   }
 

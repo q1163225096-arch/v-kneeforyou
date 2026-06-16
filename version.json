@@ -51,7 +51,13 @@
   "searchIndexRepairs": {
     "bangkeAdded": 2,
     "bangkeExpectedHits": 2,
-    "updatedAt": "2026-06-16T23:10:46.881Z",
-    "bangkeRewrittenWithUnicode": true
+    "updatedAt": "2026-06-16T23:23:24.390Z",
+    "bangkeRewrittenWithUnicode": true,
+    "fullCachedFolderIndex": true,
+    "foldersIndexed": 159010,
+    "retainedFileRecords": 100,
+    "totalSearchRecords": 159110,
+    "childFilesRead": 130600,
+    "matchMode": "name-only"
   }
 }
