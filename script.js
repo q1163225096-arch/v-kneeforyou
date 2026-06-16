@@ -291,7 +291,7 @@
       if (state.type === "dir" && !isFolderRecord(record)) return false;
       if (state.type === "file" && isFolderRecord(record)) return false;
       if (!state.searching || !needle) return true;
-      return normalize(`${getName(record)} ${getPath(record)}`).includes(needle);
+      return normalize(getName(record)).includes(needle);
     });
     return state.searching ? filtered.slice(0, 500) : filtered;
   }
