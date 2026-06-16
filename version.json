@@ -47,5 +47,11 @@
     "unreadable": 0,
     "updatedAt": "2026-06-16T23:00:07.934Z",
     "allowedEmptyRootFolders": 1
+  },
+  "searchIndexRepairs": {
+    "bangkeAdded": 2,
+    "bangkeExpectedHits": 2,
+    "updatedAt": "2026-06-16T23:10:46.881Z",
+    "bangkeRewrittenWithUnicode": true
   }
 }

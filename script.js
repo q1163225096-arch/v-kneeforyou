@@ -148,7 +148,7 @@
     return String(value || "").replace(/\s+/g, "").toLowerCase();
   }
 
-  const siteKeywords = new Set(["帮课", "已购免费未购看链接", "已购", "免费", "未购", "看链接"].map(normalize));
+  const siteKeywords = new Set(["已购免费未购看链接", "已购", "免费", "未购", "看链接"].map(normalize));
 
   function isSiteKeywordSearch(value) {
     return siteKeywords.has(normalize(value));
