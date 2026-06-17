@@ -4,7 +4,7 @@
   const childrenMap = data.children || {};
   const childFiles = data.childFiles || {};
   const PAGE_SIZE = 500;
-  const SEARCH_INDEX_VERSION = "20260617-9";
+  const SEARCH_INDEX_VERSION = "20260617-10";
   const SEARCH_MANIFEST_URL = `./data/search-manifest.json?v=${SEARCH_INDEX_VERSION}`;
   const DIRTS_DIRECT_URL = "https://path.dirts.cn/suda/server/front/business/path/file/list";
   const DIRTS_DIRECT_AUTH = "65516aa4f5cc9c2681bf791c4593020c679ca8a6165030a6c26429ebac1dc2f4";
@@ -144,7 +144,27 @@
   }
 
   function normalize(value) {
-    return String(value || "").replace(/\s+/g, "").toLowerCase();
+    return String(value || "")
+      .normalize("NFKC")
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, "");
+  }
+
+  function searchNeedles(value) {
+    const text = String(value || "").normalize("NFKC").toLowerCase();
+    const whole = normalize(text);
+    const parts = text
+      .split(/[^\p{L}\p{N}]+/gu)
+      .map(normalize)
+      .filter(Boolean);
+    const needles = parts.length > 1 ? parts : [whole];
+    return Array.from(new Set(needles)).filter(Boolean);
+  }
+
+  function textMatchesNeedles(text, needles) {
+    if (!needles.length) return true;
+    const haystack = normalize(text);
+    return needles.every((needle) => haystack.includes(needle));
   }
 
   const siteKeywords = new Set(["已购免费未购看链接", "已购", "免费", "未购", "看链接"].map(normalize));
@@ -291,17 +311,18 @@
     };
   }
 
-  function searchItemMatches(item, needle, matchesSiteKeyword) {
+  function searchItemMatches(item, needles, matchesSiteKeyword) {
     const folder = getSearchItemIsFolder(item);
     if (state.type === "dir" && !folder) return false;
     if (state.type === "file" && folder) return false;
-    if (!needle || matchesSiteKeyword) return true;
-    return normalize(getSearchItemName(item)).includes(needle);
+    if (!needles.length || matchesSiteKeyword) return true;
+    return textMatchesNeedles(getSearchItemName(item), needles);
   }
 
   async function searchStaticChunks(limit) {
     const manifest = await loadSearchManifest();
     const needle = normalize(state.query);
+    const needles = searchNeedles(state.query);
     const matchesSiteKeyword = isSiteKeywordSearch(needle);
     const results = [];
 
@@ -312,7 +333,7 @@
       const rows = Array.isArray(json) ? json : Array.isArray(json.data) ? json.data : [];
 
       for (const item of rows) {
-        if (!searchItemMatches(item, needle, matchesSiteKeyword)) continue;
+        if (!searchItemMatches(item, needles, matchesSiteKeyword)) continue;
         results.push(expandSearchItem(item));
         if (results.length > limit) {
           return { data: results.slice(0, limit), more: true };
@@ -346,6 +367,7 @@
 
   function filterRecords(records) {
     const needle = normalize(state.query);
+    const needles = searchNeedles(state.query);
     const matchesSiteKeyword = isSiteKeywordSearch(needle);
     const scopePath =
       state.scope === "current" && currentFolder() ? normalize(getPath(currentFolder().record)) : "";
@@ -355,7 +377,7 @@
       if (state.type === "file" && isFolderRecord(record)) return false;
       if (scopePath && !normalize(getPath(record)).includes(scopePath)) return false;
       if (!needle || matchesSiteKeyword) return true;
-      return normalize(getName(record)).includes(needle);
+      return textMatchesNeedles(getName(record), needles);
     });
   }
 
@@ -373,11 +395,12 @@
       : currentRecords();
 
     const needle = normalize(state.query);
+    const needles = searchNeedles(state.query);
     const filtered = source.filter((record) => {
       if (state.type === "dir" && !isFolderRecord(record)) return false;
       if (state.type === "file" && isFolderRecord(record)) return false;
       if (!state.searching || !needle) return true;
-      return normalize(getName(record)).includes(needle);
+      return textMatchesNeedles(getName(record), needles);
     });
     return state.searching ? filtered.slice(0, 500) : filtered;
   }

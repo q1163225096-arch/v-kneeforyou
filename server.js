@@ -86,7 +86,27 @@ function replaceText(value) {
 }
 
 function normalize(value) {
-  return String(value || "").replace(/\s+/g, "").toLowerCase();
+  return String(value || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+function searchNeedles(value) {
+  const text = String(value || "").normalize("NFKC").toLowerCase();
+  const whole = normalize(text);
+  const parts = text
+    .split(/[^\p{L}\p{N}]+/gu)
+    .map(normalize)
+    .filter(Boolean);
+  const needles = parts.length > 1 ? parts : [whole];
+  return Array.from(new Set(needles)).filter(Boolean);
+}
+
+function textMatchesNeedles(text, needles) {
+  if (!needles.length) return true;
+  const haystack = normalize(text);
+  return needles.every((needle) => haystack.includes(needle));
 }
 
 const siteKeywords = new Set(["帮课", "已购免费未购看链接", "已购", "免费", "未购", "看链接"].map(normalize));
@@ -155,7 +175,9 @@ function loadLocalSearchRecords() {
 }
 
 function searchLocalRecords(body) {
-  const query = normalize(body.name || body.query || "");
+  const rawQuery = body.name || body.query || "";
+  const query = normalize(rawQuery);
+  const needles = searchNeedles(rawQuery);
   const page = Math.max(1, Number(body.page || 1));
   const size = Math.max(1, Math.min(1000, Number(body.size || 500)));
   const scopePath = normalize(body.path || "");
@@ -167,11 +189,11 @@ function searchLocalRecords(body) {
   if (scopePath) {
     records = records.filter((record) => normalize(replaceText(recordPath(record))).includes(scopePath));
   }
-  if (query && !isSiteKeywordSearch(query)) {
+  if (needles.length && !isSiteKeywordSearch(query)) {
     records = records.filter((record) => {
       const rawText = `${recordName(record)} ${recordPath(record)}`;
       const displayText = replaceText(rawText);
-      return normalize(rawText).includes(query) || normalize(displayText).includes(query);
+      return textMatchesNeedles(rawText, needles) || textMatchesNeedles(displayText, needles);
     });
   }
 
