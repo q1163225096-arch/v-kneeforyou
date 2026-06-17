@@ -33,10 +33,6 @@
     breadcrumb: document.getElementById("breadcrumb"),
     list: document.getElementById("fileList"),
     empty: document.getElementById("emptyState"),
-    aboutRow: document.getElementById("aboutRow"),
-    aboutLink: document.getElementById("aboutLink"),
-    dialog: document.getElementById("aboutDialog"),
-    dialogClose: document.getElementById("dialogClose"),
     toast: document.getElementById("toast"),
     serverBanner: document.getElementById("serverBanner"),
   };
@@ -646,7 +642,6 @@
   function renderBreadcrumb() {
     const shouldShow = state.stack.length > 0 || state.searching;
     elements.breadcrumb.classList.toggle("is-hidden", !shouldShow);
-    elements.aboutRow.classList.toggle("is-hidden", shouldShow);
     if (!shouldShow) {
       elements.breadcrumb.innerHTML = "";
       return;
@@ -782,22 +777,6 @@
       return;
     }
     showToast("已到最后一层");
-  });
-
-  elements.aboutLink.addEventListener("click", () => {
-    if (typeof elements.dialog.showModal === "function") {
-      elements.dialog.showModal();
-    } else {
-      elements.dialog.setAttribute("open", "");
-    }
-  });
-
-  elements.dialogClose.addEventListener("click", () => {
-    elements.dialog.close();
-  });
-
-  elements.dialog.addEventListener("click", (event) => {
-    if (event.target === elements.dialog) elements.dialog.close();
   });
 
   document.title = data.info && data.info.title ? data.info.title : document.title;
