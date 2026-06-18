@@ -696,7 +696,7 @@
     if (state.loading) {
       state.renderedRecords = [];
       elements.empty.classList.add("is-hidden");
-      elements.list.innerHTML = `<div class="loading-row">加载中</div>`;
+      elements.list.innerHTML = `<div class="loading-row">客官勿急，给你跳个舞，加微信:kneeforyou</div>`;
       return;
     }
 
