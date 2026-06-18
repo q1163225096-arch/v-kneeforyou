@@ -1,0 +1,19 @@
+name = "kneeforyou-search-api"
+main = "src/worker.js"
+compatibility_date = "2026-06-18"
+
+[[r2_buckets]]
+binding = "DATA_BUCKET"
+bucket_name = "kneeforyou-private-data"
+
+[vars]
+ALLOWED_ORIGIN = "https://q1163225096-arch.github.io"
+MAX_SEARCH_RESULTS = "50"
+MAX_SEARCH_PAGES = "3"
+MAX_LIST_SIZE = "100"
+MAX_LIST_PAGES = "5"
+MIN_QUERY_LENGTH = "2"
+
+# Set secrets with:
+# npx wrangler secret put ACCESS_PASSWORD
+# npx wrangler secret put SESSION_SECRET

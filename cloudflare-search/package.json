@@ -1,0 +1,11 @@
+{
+  "name": "kneeforyou-cloudflare-search",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prepare:r2": "node tools/prepare-r2-data.js",
+    "upload:r2": "node tools/upload-r2-data.js",
+    "dev": "npx wrangler dev",
+    "deploy": "npx wrangler deploy"
+  }
+}
