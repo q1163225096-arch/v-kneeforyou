@@ -1,0 +1,13 @@
+{
+  "name": "v-kneeforyou-secure-search",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Backend-gated search UI for v-kneeforyou data.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
