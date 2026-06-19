@@ -35,6 +35,7 @@
     empty: document.getElementById("emptyState"),
     toast: document.getElementById("toast"),
     serverBanner: document.getElementById("serverBanner"),
+    scroller: document.querySelector(".layout-box"),
   };
 
   const replacementParts = [
@@ -68,9 +69,11 @@
   );
   const nameCache = new WeakMap();
   const pathCache = new WeakMap();
+  const HISTORY_KEY = "yydocx-state-v2";
   let indexedRecordsCache = null;
   let localSearchRecordsPromise = null;
   let searchManifestPromise = null;
+  let restoringHistory = false;
 
   function replaceText(value) {
     return String(value || "").replace(replacementMatcher, "kneeforyou");
@@ -175,6 +178,104 @@
 
   function currentFolder() {
     return state.stack[state.stack.length - 1];
+  }
+
+  function copyRecord(record) {
+    if (Array.isArray(record)) return record.slice();
+    const copy = {};
+    Object.keys(record || {}).forEach((key) => {
+      const value = record[key];
+      if (value == null || ["string", "number", "boolean"].includes(typeof value)) {
+        copy[key] = value;
+      }
+    });
+    return copy;
+  }
+
+  function currentScrollTop() {
+    return elements.scroller ? elements.scroller.scrollTop : window.scrollY || 0;
+  }
+
+  function restoreScrollTop(scrollTop) {
+    const applyScroll = () => {
+      const nextTop = Number(scrollTop) || 0;
+      if (elements.scroller) {
+        elements.scroller.scrollTop = nextTop;
+      } else {
+        window.scrollTo(0, nextTop);
+      }
+    };
+    applyScroll();
+    window.requestAnimationFrame(applyScroll);
+  }
+
+  function snapshotState() {
+    return {
+      key: HISTORY_KEY,
+      stack: state.stack.map((folder) => ({
+        key: folder.key,
+        name: folder.name,
+        record: copyRecord(folder.record),
+      })),
+      query: state.query,
+      searching: state.searching,
+      type: state.type,
+      scope: state.scope,
+      searchResults: Array.isArray(state.searchResults) ? state.searchResults.map(copyRecord) : null,
+      searchMore: state.searchMore,
+      searchPage: state.searchPage,
+      scrollTop: currentScrollTop(),
+    };
+  }
+
+  function saveHistoryState(replace) {
+    if (restoringHistory || !window.history || !window.history.pushState) return;
+    try {
+      const method = replace ? "replaceState" : "pushState";
+      window.history[method](snapshotState(), "", window.location.href);
+    } catch (error) {
+      // Browser history is an enhancement; the directory view still works without it.
+    }
+  }
+
+  function syncFilterControls() {
+    if (!elements.filters) return;
+    elements.filters
+      .querySelectorAll(".radio-button[data-filter]")
+      .forEach((button) => {
+        button.classList.toggle("is-active", state[button.dataset.filter] === button.dataset.value);
+      });
+  }
+
+  async function restoreFromHistory(historyState) {
+    if (!historyState || historyState.key !== HISTORY_KEY) return;
+    restoringHistory = true;
+    state.stack = Array.isArray(historyState.stack)
+      ? historyState.stack.map((folder) => ({
+          key: folder.key,
+          name: folder.name,
+          record: folder.record || {},
+        }))
+      : [];
+    state.query = historyState.query || "";
+    state.searching = Boolean(historyState.searching && state.query);
+    state.type = historyState.type || "all";
+    state.scope = historyState.scope || "global";
+    state.searchResults = Array.isArray(historyState.searchResults) ? historyState.searchResults : null;
+    state.searchMore = Boolean(historyState.searchMore);
+    state.searchPage = historyState.searchPage || 1;
+    state.loading = false;
+    state.loadingMore = false;
+    elements.input.value = state.query;
+    syncFilterControls();
+
+    if (state.searching && !Array.isArray(state.searchResults)) {
+      await runSearch(state.searchPage, false);
+    } else {
+      render();
+    }
+    restoreScrollTop(historyState.scrollTop);
+    restoringHistory = false;
   }
 
   function canUseStaticFiles() {
@@ -543,6 +644,7 @@
   }
 
   async function openFolder(record) {
+    saveHistoryState(true);
     const entry = await ensureChildren(record);
     if (!entry) {
       render();
@@ -562,11 +664,14 @@
     state.searchResults = null;
     elements.input.value = "";
     render();
+    restoreScrollTop(0);
+    saveHistoryState(false);
   }
 
   function jumpTo(index) {
+    saveHistoryState(true);
     if (index < 0) {
-    state.stack = [];
+      state.stack = [];
     } else {
       state.stack = state.stack.slice(0, index + 1);
     }
@@ -575,6 +680,8 @@
     state.searchResults = null;
     elements.input.value = "";
     render();
+    restoreScrollTop(0);
+    saveHistoryState(false);
   }
 
   async function runSearch(page, append) {
@@ -620,6 +727,7 @@
     if (state.searching) {
       if (!state.searchMore) return;
       await runSearch(state.searchPage + 1, true);
+      saveHistoryState(true);
       return;
     }
 
@@ -645,6 +753,7 @@
       entry.page = nextPage;
       entry.pageSize = pageSize;
       invalidateIndexCache();
+      saveHistoryState(true);
     } catch (error) {
       showToast("加载更多失败");
     } finally {
@@ -756,9 +865,13 @@
     state.searchPage = 1;
     if (state.searching) {
       await runSearch(1, false);
+      restoreScrollTop(0);
+      saveHistoryState(false);
       return;
     }
     render();
+    restoreScrollTop(0);
+    saveHistoryState(false);
   });
 
   elements.filterToggle.addEventListener("click", () => {
@@ -776,9 +889,13 @@
       .forEach((item) => item.classList.toggle("is-active", item === button));
     if (state.searching && state.query) {
       await runSearch(1, false);
+      restoreScrollTop(0);
+      saveHistoryState(false);
       return;
     }
     render();
+    restoreScrollTop(0);
+    saveHistoryState(false);
   });
 
   elements.breadcrumb.addEventListener("click", (event) => {
@@ -805,9 +922,14 @@
     showToast("已到最后一层");
   });
 
+  window.addEventListener("popstate", (event) => {
+    restoreFromHistory(event.state);
+  });
+
   document.title = data.info && data.info.title ? data.info.title : document.title;
   if (!canUseStaticFiles() && elements.serverBanner) {
     elements.serverBanner.classList.remove("is-hidden");
   }
+  saveHistoryState(true);
   render();
 })();
