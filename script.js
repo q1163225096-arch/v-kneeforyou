@@ -10,7 +10,7 @@
   const DIRTS_DIRECT_URL = "https://path.dirts.cn/suda/server/front/business/path/file/list";
   const DIRTS_DIRECT_AUTH = "65516aa4f5cc9c2681bf791c4593020c679ca8a6165030a6c26429ebac1dc2f4";
   const fileLikeExtensionPattern =
-    /\.(?:mp4|m4v|mov|avi|mkv|wmv|flv|webm|mp3|m4a|wav|flac|aac|ogg|zip|rar|7z|tar|gz|pdf|doc|docx|xls|xlsx|xlsm|ppt|pptx|txt|md|csv|json|html|htm|jpg|jpeg|png|gif|webp|svg|psd|ai|prproj|aep|exe|apk|dmg|iso|cube|mb|ds_store|ttc|otf|rbz|mmap|tsdownloading|dbf|prj|sbn|sbx|shp|shx|jar|hdr|cpg|fbx|jmx|pst|drawio|rpm|octet-stream|wedrive|\d+)(?:$|[?#\s])/i;
+    /\.(?:mp4|m4v|mov|avi|mkv|wmv|flv|webm|mp3|m4a|wav|flac|aac|ogg|zip|rar|7z|tar|gz|pdf|doc|docx|xls|xlsx|xlsm|ppt|pptx|txt|md|csv|json|html|htm|jpg|jpeg|png|gif|webp|svg|psd|ai|prproj|aep|exe|apk|dmg|iso|cube|mb|ds_store|ttc|otf|rbz|mmap|tsdownloading|dbf|prj|sbn|sbx|shp|shx|jar|hdr|cpg|fbx|jmx|pst|drawio|rpm|octet-stream|wedrive)(?:$|[?#\s])/i;
 
   const state = {
     stack: [],
@@ -165,15 +165,22 @@
     return Boolean(cached && Array.isArray(cached.data) && cached.data.length === 0 && !cached.more);
   }
 
+  function looksLikeDirectory(record) {
+    return getName(record).includes("【目录】");
+  }
+
   function looksLikeFile(record) {
+    if (Number(record.category) === 6 || looksLikeDirectory(record)) return false;
     const name = getName(record);
     const pathTail = String(getPath(record)).split(/[\\/]/).pop();
     return fileLikeExtensionPattern.test(`${name} ${pathTail}`);
   }
 
   function isFolderRecord(record) {
-    if (!record || !record.isDir) return false;
-    if (hasEmptyCachedChildren(record)) return false;
+    if (!record) return false;
+    const namedDirectory = looksLikeDirectory(record);
+    if (!record.isDir && !namedDirectory) return false;
+    if (hasEmptyCachedChildren(record) && !namedDirectory) return false;
     if (hasCachedChildren(record)) return true;
     return !looksLikeFile(record);
   }
@@ -734,7 +741,7 @@
       render();
       return;
     }
-    if (Array.isArray(entry.data) && entry.data.length === 0 && !entry.more && !isAllowedEmptyFolder(record)) {
+    if (Array.isArray(entry.data) && entry.data.length === 0 && !entry.more && !isAllowedEmptyFolder(record) && !looksLikeDirectory(record)) {
       record.isDir = 0;
       if ("isdir" in record) record.isdir = 0;
       showToast("\u5df2\u7ecf\u662f\u6700\u540e\u4e00\u7ea7");
