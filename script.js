@@ -4,9 +4,9 @@
   const childrenMap = data.children || {};
   const childFiles = data.childFiles || {};
   const PAGE_SIZE = 500;
-  const SEARCH_INDEX_VERSION = "20260617-11";
+  const SEARCH_INDEX_VERSION = "20260619-split";
   const SEARCH_MANIFEST_URL = `./data/search-manifest.json?v=${SEARCH_INDEX_VERSION}`;
-  const SEARCH_CHUNKS_PER_PAGE = 2;
+  const SEARCH_CHUNKS_PER_PAGE = 10;
   const DIRTS_DIRECT_URL = "https://path.dirts.cn/suda/server/front/business/path/file/list";
   const DIRTS_DIRECT_AUTH = "65516aa4f5cc9c2681bf791c4593020c679ca8a6165030a6c26429ebac1dc2f4";
   const fileLikeExtensionPattern =
@@ -75,6 +75,7 @@
   let indexedRecordsCache = null;
   let localSearchRecordsPromise = null;
   let searchManifestPromise = null;
+  const searchChunkCache = new Map();
   const childIndexCache = new Map();
   let restoringHistory = false;
 
@@ -391,6 +392,7 @@
     indexedRecordsCache = null;
     localSearchRecordsPromise = null;
     searchManifestPromise = null;
+    searchChunkCache.clear();
   }
 
   async function loadSearchManifest() {
@@ -404,6 +406,23 @@
       })();
     }
     return searchManifestPromise;
+  }
+
+  function loadSearchChunk(chunk) {
+    const file = chunk && chunk.file;
+    if (!file) return Promise.resolve([]);
+    if (!searchChunkCache.has(file)) {
+      searchChunkCache.set(
+        file,
+        (async () => {
+          const response = await fetch(`./data/${file}?v=${SEARCH_INDEX_VERSION}`);
+          if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+          const json = await response.json();
+          return Array.isArray(json) ? json : Array.isArray(json.data) ? json.data : [];
+        })()
+      );
+    }
+    return searchChunkCache.get(file);
   }
 
   function getSearchItemName(item) {
@@ -492,12 +511,10 @@
       Math.max(1, Math.ceil(limit / PAGE_SIZE)) * SEARCH_CHUNKS_PER_PAGE
     );
 
-    for (const chunk of manifest.chunks.slice(0, chunksToScan)) {
-      const response = await fetch(`./data/${chunk.file}?v=${SEARCH_INDEX_VERSION}`);
-      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-      const json = await response.json();
-      const rows = Array.isArray(json) ? json : Array.isArray(json.data) ? json.data : [];
-
+    const chunkRows = await Promise.all(
+      manifest.chunks.slice(0, chunksToScan).map((chunk) => loadSearchChunk(chunk))
+    );
+    for (const rows of chunkRows) {
       for (const item of rows) {
         if (!searchItemMatches(item, needles, matchesSiteKeyword)) continue;
         if (addResult(expandSearchItem(item))) {
