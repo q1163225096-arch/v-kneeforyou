@@ -6,6 +6,7 @@
   const PAGE_SIZE = 500;
   const SEARCH_INDEX_VERSION = "20260617-11";
   const SEARCH_MANIFEST_URL = `./data/search-manifest.json?v=${SEARCH_INDEX_VERSION}`;
+  const SEARCH_CHUNKS_PER_PAGE = 2;
   const DIRTS_DIRECT_URL = "https://path.dirts.cn/suda/server/front/business/path/file/list";
   const DIRTS_DIRECT_AUTH = "65516aa4f5cc9c2681bf791c4593020c679ca8a6165030a6c26429ebac1dc2f4";
   const fileLikeExtensionPattern =
@@ -452,7 +453,16 @@
       }
     }
 
-    for (const chunk of manifest.chunks) {
+    if (results.length > 0 && limit <= PAGE_SIZE) {
+      return { data: results, more: true };
+    }
+
+    const chunksToScan = Math.min(
+      manifest.chunks.length,
+      Math.max(1, Math.ceil(limit / PAGE_SIZE)) * SEARCH_CHUNKS_PER_PAGE
+    );
+
+    for (const chunk of manifest.chunks.slice(0, chunksToScan)) {
       const response = await fetch(`./data/${chunk.file}?v=${SEARCH_INDEX_VERSION}`);
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
       const json = await response.json();
@@ -466,7 +476,7 @@
       }
     }
 
-    return { data: results, more: false };
+    return { data: results, more: chunksToScan < manifest.chunks.length };
   }
 
   async function loadLocalSearchRecords() {
