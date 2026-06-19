@@ -165,24 +165,34 @@
     return Boolean(cached && Array.isArray(cached.data) && cached.data.length === 0 && !cached.more);
   }
 
-  function looksLikeDirectory(record) {
+  function hasDirectoryLabel(record) {
     return getName(record).includes("【目录】");
   }
 
-  function looksLikeFile(record) {
-    if (Number(record.category) === 6 || looksLikeDirectory(record)) return false;
+  function hasFileExtension(record) {
     const name = getName(record);
     const pathTail = String(getPath(record)).split(/[\\/]/).pop();
     return fileLikeExtensionPattern.test(`${name} ${pathTail}`);
   }
 
+  function looksLikeDirectory(record) {
+    return hasDirectoryLabel(record) && !hasFileExtension(record);
+  }
+
+  function looksLikeFile(record) {
+    if (hasFileExtension(record)) return true;
+    if (Number(record.category) === 6 || hasDirectoryLabel(record)) return false;
+    return false;
+  }
+
   function isFolderRecord(record) {
     if (!record) return false;
+    if (looksLikeFile(record)) return false;
     const namedDirectory = looksLikeDirectory(record);
     if (!record.isDir && !namedDirectory) return false;
     if (hasEmptyCachedChildren(record) && !namedDirectory) return false;
     if (hasCachedChildren(record)) return true;
-    return !looksLikeFile(record);
+    return true;
   }
 
   function normalize(value) {
