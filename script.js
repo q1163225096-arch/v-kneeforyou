@@ -65,7 +65,7 @@
   ];
   const replacementMatcher = new RegExp(
     replacementParts.map((parts) => escapeRegExp(parts.join(""))).join("|"),
-    "g"
+    "gi"
   );
   const nameCache = new WeakMap();
   const pathCache = new WeakMap();
@@ -168,6 +168,10 @@
     if (!needles.length) return true;
     const haystack = normalize(text);
     return needles.every((needle) => haystack.includes(needle));
+  }
+
+  function getSearchableText(record) {
+    return `${getName(record)} ${getPath(record)}`;
   }
 
   const siteKeywords = new Set(["已购免费未购看链接", "已购", "免费", "未购", "看链接"].map(normalize));
@@ -376,6 +380,12 @@
     return replaceText(item[0] === 1 ? item[1] : item[0]);
   }
 
+  function getSearchItemText(item) {
+    if (!Array.isArray(item)) return getSearchableText(item);
+    if (item[0] === 1) return replaceText(`${item[1] || ""} ${item[2] || ""}`);
+    return replaceText(item[0] || "");
+  }
+
   function getSearchItemIsFolder(item) {
     if (!Array.isArray(item)) return isFolderRecord(item);
     return Boolean(item[0] === 1 ? item[6] : item[2]);
@@ -417,7 +427,7 @@
     if (state.type === "dir" && !folder) return false;
     if (state.type === "file" && folder) return false;
     if (!needles.length || matchesSiteKeyword) return true;
-    return textMatchesNeedles(getSearchItemName(item), needles);
+    return textMatchesNeedles(getSearchItemText(item), needles);
   }
 
   async function searchStaticChunks(limit) {
@@ -426,6 +436,21 @@
     const needles = searchNeedles(state.query);
     const matchesSiteKeyword = isSiteKeywordSearch(needle);
     const results = [];
+    const seen = new Set();
+
+    function addResult(record) {
+      const key = `${getKey(record)}:${normalize(getSearchableText(record))}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      results.push(record);
+      return results.length > limit;
+    }
+
+    for (const record of filterRecords(allIndexedRecords())) {
+      if (addResult(record)) {
+        return { data: results.slice(0, limit), more: true };
+      }
+    }
 
     for (const chunk of manifest.chunks) {
       const response = await fetch(`./data/${chunk.file}?v=${SEARCH_INDEX_VERSION}`);
@@ -435,8 +460,7 @@
 
       for (const item of rows) {
         if (!searchItemMatches(item, needles, matchesSiteKeyword)) continue;
-        results.push(expandSearchItem(item));
-        if (results.length > limit) {
+        if (addResult(expandSearchItem(item))) {
           return { data: results.slice(0, limit), more: true };
         }
       }
@@ -478,7 +502,7 @@
       if (state.type === "file" && isFolderRecord(record)) return false;
       if (scopePath && !normalize(getPath(record)).includes(scopePath)) return false;
       if (!needle || matchesSiteKeyword) return true;
-      return textMatchesNeedles(getName(record), needles);
+      return textMatchesNeedles(getSearchableText(record), needles);
     });
   }
 
@@ -501,7 +525,7 @@
       if (state.type === "dir" && !isFolderRecord(record)) return false;
       if (state.type === "file" && isFolderRecord(record)) return false;
       if (!state.searching || !needle) return true;
-      return textMatchesNeedles(getName(record), needles);
+      return textMatchesNeedles(getSearchableText(record), needles);
     });
     return state.searching ? filtered.slice(0, 500) : filtered;
   }
