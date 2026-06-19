@@ -71,9 +71,11 @@
   const nameCache = new WeakMap();
   const pathCache = new WeakMap();
   const HISTORY_KEY = "yydocx-state-v2";
+  const CHILD_INDEX_VERSION = "20260619-bootstrap";
   let indexedRecordsCache = null;
   let localSearchRecordsPromise = null;
   let searchManifestPromise = null;
+  const childIndexCache = new Map();
   let restoringHistory = false;
 
   function replaceText(value) {
@@ -115,6 +117,34 @@
       return `dirts:${record.rootId || record.id}:${record.path || ""}`;
     }
     return `${record.pathId}:${record.associationFileId || record.id || ""}`;
+  }
+
+  function hashKey(value) {
+    let hash = 2166136261;
+    const text = String(value || "");
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+  }
+
+  function childIndexFile(key) {
+    return `i${String(hashKey(key) % 256).padStart(3, "0")}.json`;
+  }
+
+  async function indexedChildFile(key) {
+    if (childFiles[key]) return childFiles[key];
+    const file = childIndexFile(key);
+    if (!childIndexCache.has(file)) {
+      const response = await fetch(`./data/child-index/${file}?v=${CHILD_INDEX_VERSION}`);
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      const json = await response.json();
+      childIndexCache.set(file, json && typeof json === "object" ? json : {});
+    }
+    const childFile = childIndexCache.get(file)[key];
+    if (childFile) childFiles[key] = childFile;
+    return childFile || "";
   }
 
   function hasCachedChildren(record) {
@@ -584,17 +614,20 @@
     const cached = childrenMap[key];
     if (cached && Array.isArray(cached.data)) return cached;
 
-    if (childFiles[key] && canUseStaticFiles()) {
+    if (canUseStaticFiles()) {
       state.loading = true;
       render();
       try {
-        const response = await fetch(`./data/${childFiles[key]}`);
-        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-        const json = await response.json();
-        const entry = normalizeStaticEntry(record, json);
-        childrenMap[key] = entry;
-        invalidateIndexCache();
-        return entry;
+        const childFile = childFiles[key] || (await indexedChildFile(key));
+        if (childFile) {
+          const response = await fetch(`./data/${childFile}`);
+          if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+          const json = await response.json();
+          const entry = normalizeStaticEntry(record, json);
+          childrenMap[key] = entry;
+          invalidateIndexCache();
+          return entry;
+        }
       } catch (error) {
         showToast("本地目录缓存加载失败，正在尝试在线加载");
       } finally {
