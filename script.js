@@ -4,7 +4,7 @@
   const childrenMap = data.children || {};
   const childFiles = data.childFiles || {};
   const PAGE_SIZE = 500;
-  const SEARCH_INDEX_VERSION = "20260619-split";
+  const SEARCH_INDEX_VERSION = "20260624-sync-6-22-6-23";
   const SEARCH_MANIFEST_URL = `./data/search-manifest.json?v=${SEARCH_INDEX_VERSION}`;
   const SEARCH_CHUNKS_PER_PAGE = 10;
   const DIRTS_DIRECT_URL = "https://path.dirts.cn/suda/server/front/business/path/file/list";
@@ -71,7 +71,7 @@
   const nameCache = new WeakMap();
   const pathCache = new WeakMap();
   const HISTORY_KEY = "yydocx-state-v2";
-  const CHILD_INDEX_VERSION = "20260619-bootstrap";
+  const CHILD_INDEX_VERSION = "20260624-sync-6-22-6-23";
   let indexedRecordsCache = null;
   let localSearchRecordsPromise = null;
   let searchManifestPromise = null;
