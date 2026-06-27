@@ -335,6 +335,15 @@
     return window.location.protocol !== "file:";
   }
 
+  function readInitialQuery() {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return (params.get("q") || params.get("query") || params.get("keyword") || "").trim();
+    } catch (error) {
+      return "";
+    }
+  }
+
   function canUseRemoteApi() {
     if (window.location.protocol === "file:") return false;
     const hostname = window.location.hostname;
@@ -442,6 +451,18 @@
     return searchChunkCache.get(file);
   }
 
+  function selectSearchChunks(chunks, count) {
+    if (count >= chunks.length) return chunks;
+    const headCount = Math.ceil(count / 2);
+    const tailCount = Math.max(count - headCount, 16);
+    const selected = chunks.slice(0, headCount);
+    const seen = new Set(selected.map((chunk) => chunk.file));
+    for (const chunk of chunks.slice(chunks.length - tailCount)) {
+      if (!seen.has(chunk.file)) selected.push(chunk);
+    }
+    return selected;
+  }
+
   function getSearchItemName(item) {
     if (!Array.isArray(item)) return getName(item);
     return replaceText(item[0] === 1 ? item[1] : item[0]);
@@ -528,9 +549,7 @@
       Math.max(1, Math.ceil(limit / PAGE_SIZE)) * SEARCH_CHUNKS_PER_PAGE
     );
 
-    const chunkRows = await Promise.all(
-      manifest.chunks.slice(0, chunksToScan).map((chunk) => loadSearchChunk(chunk))
-    );
+    const chunkRows = await Promise.all(selectSearchChunks(manifest.chunks, chunksToScan).map((chunk) => loadSearchChunk(chunk)));
     for (const rows of chunkRows) {
       for (const item of rows) {
         if (!searchItemMatches(item, needles, matchesSiteKeyword)) continue;
@@ -1027,10 +1046,26 @@
     restoreFromHistory(event.state);
   });
 
-  document.title = data.info && data.info.title ? data.info.title : document.title;
-  if (!canUseStaticFiles() && elements.serverBanner) {
-    elements.serverBanner.classList.remove("is-hidden");
+  async function initialize() {
+    document.title = data.info && data.info.title ? `${data.info.title} - 网课课程目录搜索` : document.title;
+    if (!canUseStaticFiles() && elements.serverBanner) {
+      elements.serverBanner.classList.remove("is-hidden");
+    }
+
+    const initialQuery = readInitialQuery();
+    if (initialQuery && normalize(initialQuery).length >= 2) {
+      state.query = initialQuery;
+      state.searching = true;
+      elements.input.value = initialQuery;
+      await runSearch(1, false);
+      restoreScrollTop(0);
+      saveHistoryState(true);
+      return;
+    }
+
+    saveHistoryState(true);
+    render();
   }
-  saveHistoryState(true);
-  render();
+
+  initialize();
 })();

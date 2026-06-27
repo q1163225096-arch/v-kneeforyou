@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://q1163225096-arch.github.io/v-kneeforyou/sitemap.xml
+Sitemap: https://kneeforyou.netlify.app/sitemap.xml
