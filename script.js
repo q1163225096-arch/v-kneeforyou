@@ -972,7 +972,7 @@
         const folderPath = getRecordFolderPath(record);
         const pathText = folder ? `目录：${formatDisplayPath(fullPath)}` : `所在目录：${formatDisplayPath(folderPath)}`;
         const shouldShowFolderPath = !folder && !looksLikeDirectory(record);
-        const titleText = shouldShowFolderPath ? `${name}\n${pathText}\n完整路径：${formatDisplayPath(fullPath)}`;
+        const titleText = shouldShowFolderPath ? `${name}\n${pathText}\n完整路径：${formatDisplayPath(fullPath)}` : name;
         const pathMeta = !isHomeList && shouldShowFolderPath
           ? `<div class="file-path" title="${escapeAttribute(titleText)}">${escapeHtml(pathText)}</div>`
           : "";
