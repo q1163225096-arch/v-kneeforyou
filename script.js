@@ -5,6 +5,8 @@
   const childFiles = data.childFiles || {};
   const PAGE_SIZE = 500;
   const SEARCH_INDEX_VERSION = "20260624-sync-6-22-6-23";
+  const PARENT_INDEX_VERSION = "20260710-parent-3";
+  const PARENT_INDEX_BUCKETS = 32;
   const SEARCH_MANIFEST_URL = `./data/search-manifest.json?v=${SEARCH_INDEX_VERSION}`;
   const SEARCH_CHUNKS_PER_PAGE = 10;
   const DIRTS_DIRECT_URL = "https://path.dirts.cn/suda/server/front/business/path/file/list";
@@ -70,6 +72,10 @@
   );
   const nameCache = new WeakMap();
   const pathCache = new WeakMap();
+  const parentIndexCache = new Map();
+  const parentIndexLoading = new Map();
+  const parentNamesCache = new Map();
+  const parentNamesLoading = new Map();
   const HISTORY_KEY = "yydocx-state-v2";
   const CHILD_INDEX_VERSION = "20260624-sync-6-22-6-23";
   let indexedRecordsCache = null;
@@ -138,6 +144,88 @@
       parts.pop();
     }
     return parts.length > 0 ? `/${parts.join("/")}` : "/";
+  }
+
+  function parentLookupParts(record) {
+    if (!record || typeof record !== "object") return null;
+    const pathId = record.pathId == null ? "" : String(record.pathId);
+    const fileId = record.associationFileId || record.id || record.fsId || "";
+    if (!pathId || !fileId) return null;
+    return { pathId, fileId: String(fileId) };
+  }
+
+  function parentIndexBucket(fileId) {
+    return String(hashKey(fileId) % PARENT_INDEX_BUCKETS).padStart(2, "0");
+  }
+
+  function scheduleRender() {
+    window.clearTimeout(scheduleRender.timer);
+    scheduleRender.timer = window.setTimeout(render, 0);
+  }
+
+  function startParentNamesLoad(pathId) {
+    if (!pathId || parentNamesCache.has(pathId) || parentNamesLoading.has(pathId)) return;
+    const url = `./data/parent-index/p${encodeURIComponent(pathId)}-parents.json?v=${PARENT_INDEX_VERSION}`;
+    const loading = fetch(url)
+      .then((response) => {
+        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+        return response.json();
+      })
+      .then((json) => {
+        parentNamesCache.set(pathId, Array.isArray(json[1]) ? json[1] : []);
+        scheduleRender();
+      })
+      .catch(() => {
+        parentNamesCache.set(pathId, null);
+      })
+      .finally(() => {
+        parentNamesLoading.delete(pathId);
+      });
+    parentNamesLoading.set(pathId, loading);
+  }
+
+  function startParentIndexLoad(pathId, bucket) {
+    const cacheKey = `${pathId}:${bucket}`;
+    if (!pathId || !bucket || parentIndexCache.has(cacheKey) || parentIndexLoading.has(cacheKey)) return;
+    const url = `./data/parent-index/p${encodeURIComponent(pathId)}-${bucket}.json?v=${PARENT_INDEX_VERSION}`;
+    const loading = fetch(url)
+      .then((response) => {
+        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+        return response.json();
+      })
+      .then((json) => {
+        const files = Array.isArray(json[1]) ? json[1] : [];
+        const lookup = Object.create(null);
+        files.forEach((item) => {
+          if (!Array.isArray(item)) return;
+          if (item[0] != null && item[1] != null) lookup[String(item[0])] = item[1];
+        });
+        parentIndexCache.set(cacheKey, lookup);
+        scheduleRender();
+      })
+      .catch(() => {
+        parentIndexCache.set(cacheKey, null);
+      })
+      .finally(() => {
+        parentIndexLoading.delete(cacheKey);
+      });
+    parentIndexLoading.set(cacheKey, loading);
+  }
+
+  function getIndexedParentFolderPath(record) {
+    if (!state.searching || isFolderRecord(record) || looksLikeDirectory(record)) return "";
+    const parts = parentLookupParts(record);
+    if (!parts) return "";
+    const bucket = parentIndexBucket(parts.fileId);
+    const cacheKey = `${parts.pathId}:${bucket}`;
+    const parentNames = parentNamesCache.get(parts.pathId);
+    const lookup = parentIndexCache.get(cacheKey);
+    if (lookup && parentNames && lookup[parts.fileId] != null && parentNames[lookup[parts.fileId]]) {
+      return normalizeDisplayPath(`/${parentNames[lookup[parts.fileId]]}`);
+    }
+    if (!parentNamesCache.has(parts.pathId)) startParentNamesLoad(parts.pathId);
+    if (!parentIndexCache.has(cacheKey)) startParentIndexLoad(parts.pathId, bucket);
+    return "";
   }
 
   function formatDisplayPath(value) {
@@ -972,10 +1060,12 @@
         const folder = isFolderRecord(record);
         const key = `${getKey(record)}:${index}`;
         const fullPath = getRecordFullPath(record);
-        const folderPath = getRecordFolderPath(record, activeFolderPath);
+        const indexedFolderPath = getIndexedParentFolderPath(record);
+        const folderPath = indexedFolderPath || getRecordFolderPath(record, activeFolderPath);
+        const displayFullPath = indexedFolderPath ? joinRecordPath({ associationFilePath: indexedFolderPath }, name) : fullPath;
         const pathText = folder ? `目录：${formatDisplayPath(fullPath)}` : `所在目录：${formatDisplayPath(folderPath)}`;
-        const shouldShowFolderPath = state.searching && !folder && !looksLikeDirectory(record);
-        const titleText = shouldShowFolderPath ? `${name}\n${pathText}\n完整路径：${formatDisplayPath(fullPath)}` : name;
+        const shouldShowFolderPath = state.searching && !folder && !looksLikeDirectory(record) && normalizeDisplayPath(folderPath) !== "/";
+        const titleText = shouldShowFolderPath ? `${name}\n${pathText}\n完整路径：${formatDisplayPath(displayFullPath)}` : name;
         const pathMeta = shouldShowFolderPath
           ? `<div class="file-path" title="${escapeAttribute(titleText)}">${escapeHtml(pathText)}</div>`
           : "";
