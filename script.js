@@ -971,10 +971,11 @@
         const fullPath = getRecordFullPath(record);
         const folderPath = getRecordFolderPath(record);
         const pathText = folder ? `目录：${formatDisplayPath(fullPath)}` : `所在目录：${formatDisplayPath(folderPath)}`;
-        const titleText = `${name}\n${pathText}\n完整路径：${formatDisplayPath(fullPath)}`;
-        const pathMeta = isHomeList
-          ? ""
-          : `<div class="file-path" title="${escapeAttribute(titleText)}">${escapeHtml(pathText)}</div>`;
+        const shouldShowFolderPath = !folder && !looksLikeDirectory(record);
+        const titleText = shouldShowFolderPath ? `${name}\n${pathText}\n完整路径：${formatDisplayPath(fullPath)}`;
+        const pathMeta = !isHomeList && shouldShowFolderPath
+          ? `<div class="file-path" title="${escapeAttribute(titleText)}">${escapeHtml(pathText)}</div>`
+          : "";
         return `
           <div class="file-row ${folder ? "is-folder" : ""}" data-index="${index}" data-key="${escapeHtml(key)}" title="${escapeAttribute(titleText)}" aria-label="${escapeAttribute(titleText)}">
             ${folder ? folderIcon : fileIcon}
