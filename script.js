@@ -405,9 +405,27 @@
     if (restoringHistory || !window.history || !window.history.pushState) return;
     try {
       const method = replace ? "replaceState" : "pushState";
-      window.history[method](snapshotState(), "", window.location.href);
+      window.history[method](snapshotState(), "", urlForCurrentState());
     } catch (error) {
       // Browser history is an enhancement; the directory view still works without it.
+    }
+  }
+
+  function urlForCurrentState() {
+    try {
+      const url = new URL(window.location.href);
+      url.search = "";
+      if (state.searching && state.query) {
+        url.searchParams.set("q", state.query);
+        if (state.type && state.type !== "all") url.searchParams.set("type", state.type);
+        if (state.scope && state.scope !== "global" && state.stack.length === 0) {
+          url.searchParams.set("scope", state.scope);
+        }
+        if (state.searchPage > 1) url.searchParams.set("page", String(state.searchPage));
+      }
+      return url.href;
+    } catch (error) {
+      return window.location.href;
     }
   }
 
@@ -461,6 +479,24 @@
       return (params.get("q") || params.get("query") || params.get("keyword") || "").trim();
     } catch (error) {
       return "";
+    }
+  }
+
+  function readInitialSearchState() {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const query = (params.get("q") || params.get("query") || params.get("keyword") || "").trim();
+      const type = params.get("type");
+      const scope = params.get("scope");
+      const page = Number.parseInt(params.get("page") || "1", 10);
+      return {
+        query,
+        type: ["all", "dir", "file"].includes(type) ? type : "all",
+        scope: ["global", "current"].includes(scope) ? scope : "global",
+        page: Number.isFinite(page) && page > 1 ? page : 1,
+      };
+    } catch (error) {
+      return { query: "", type: "all", scope: "global", page: 1 };
     }
   }
 
@@ -1190,12 +1226,15 @@
       elements.serverBanner.classList.remove("is-hidden");
     }
 
-    const initialQuery = readInitialQuery();
-    if (initialQuery && normalize(initialQuery).length >= 2) {
-      state.query = initialQuery;
+    const initialSearch = readInitialSearchState();
+    if (initialSearch.query && normalize(initialSearch.query).length >= 2) {
+      state.query = initialSearch.query;
       state.searching = true;
-      elements.input.value = initialQuery;
-      await runSearch(1, false);
+      state.type = initialSearch.type;
+      state.scope = initialSearch.scope;
+      elements.input.value = initialSearch.query;
+      syncFilterControls();
+      await runSearch(initialSearch.page, false);
       restoreScrollTop(0);
       saveHistoryState(true);
       return;
