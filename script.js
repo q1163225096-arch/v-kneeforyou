@@ -705,7 +705,9 @@
       Math.max(1, Math.ceil(limit / PAGE_SIZE)) * SEARCH_CHUNKS_PER_PAGE
     );
 
-    const chunkRows = await Promise.all(selectSearchChunks(manifest.chunks, chunksToScan).map((chunk) => loadSearchChunk(chunk)));
+    const chunkRows = await Promise.all(
+      selectSearchChunks(manifest.chunks, chunksToScan).map((chunk) => loadSearchChunk(chunk).catch(() => []))
+    );
     for (const rows of chunkRows) {
       for (const item of rows) {
         if (!searchItemMatches(item, needles, matchesSiteKeyword)) continue;
