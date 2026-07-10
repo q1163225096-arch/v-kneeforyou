@@ -127,8 +127,9 @@
     return joinRecordPath({ associationFilePath: "/" }, getName(record));
   }
 
-  function getRecordFolderPath(record) {
+  function getRecordFolderPath(record, fallbackFolderPath) {
     const fullPath = normalizeDisplayPath(getPath(record));
+    if (fullPath === "/" && fallbackFolderPath) return normalizeDisplayPath(fallbackFolderPath);
     if (fullPath === "/") return "/";
 
     const name = getName(record);
@@ -963,13 +964,15 @@
     const records = visibleRecords();
     state.renderedRecords = records;
     elements.empty.classList.toggle("is-hidden", records.length > 0);
+    const activeFolder = currentFolder();
+    const activeFolderPath = !state.searching && activeFolder ? getRecordFullPath(activeFolder.record) : "";
     const rows = records
       .map((record, index) => {
         const name = getName(record);
         const folder = isFolderRecord(record);
         const key = `${getKey(record)}:${index}`;
         const fullPath = getRecordFullPath(record);
-        const folderPath = getRecordFolderPath(record);
+        const folderPath = getRecordFolderPath(record, activeFolderPath);
         const pathText = folder ? `目录：${formatDisplayPath(fullPath)}` : `所在目录：${formatDisplayPath(folderPath)}`;
         const shouldShowFolderPath = !folder && !looksLikeDirectory(record);
         const titleText = shouldShowFolderPath ? `${name}\n${pathText}\n完整路径：${formatDisplayPath(fullPath)}` : name;
@@ -987,8 +990,7 @@
       })
       .join("");
 
-    const folder = currentFolder();
-    const entry = folder ? childrenMap[folder.key] : null;
+    const entry = activeFolder ? childrenMap[activeFolder.key] : null;
     const hasMore = state.searching ? state.searchMore : Boolean(entry && entry.more);
     const moreRow = hasMore
       ? `<button class="load-more" type="button" data-action="load-more">${state.loadingMore ? "加载中" : "加载更多"}</button>`
