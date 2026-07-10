@@ -384,6 +384,38 @@ button {
   margin-left: 6px;
 }
 
+.file-detail {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: 8px;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.file-detail .file-name {
+  width: 100%;
+  margin-left: 0;
+}
+
+.file-path {
+  max-width: 100%;
+  overflow: hidden;
+  color: #7b86a8;
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-list.is-home-list .file-detail {
+  margin-left: 6px;
+}
+
+.file-list.is-home-list .file-detail .file-name {
+  margin-left: 0;
+}
+
 .empty-state {
   display: flex;
   min-height: 96px;

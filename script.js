@@ -113,6 +113,37 @@
     return `${base.replace(/\/+$/, "")}/${cleanName}`;
   }
 
+  function normalizeDisplayPath(value) {
+    const normalized = String(value || "/")
+      .replace(/\\/g, "/")
+      .replace(/\/+/g, "/")
+      .replace(/\/+$/, "");
+    return normalized || "/";
+  }
+
+  function getRecordFullPath(record) {
+    const fullPath = normalizeDisplayPath(getPath(record));
+    if (fullPath !== "/") return fullPath;
+    return joinRecordPath({ associationFilePath: "/" }, getName(record));
+  }
+
+  function getRecordFolderPath(record) {
+    const fullPath = normalizeDisplayPath(getPath(record));
+    if (fullPath === "/") return "/";
+
+    const name = getName(record);
+    const parts = fullPath.split("/").filter(Boolean);
+    if (parts.length > 0 && parts[parts.length - 1] === name) {
+      parts.pop();
+    }
+    return parts.length > 0 ? `/${parts.join("/")}` : "/";
+  }
+
+  function formatDisplayPath(value) {
+    const path = normalizeDisplayPath(value);
+    return path === "/" ? "根目录" : path;
+  }
+
   function getKey(record) {
     if (record.provider === "dirts") {
       return `dirts:${record.rootId || record.id}:${record.path || ""}`;
@@ -937,10 +968,20 @@
         const name = getName(record);
         const folder = isFolderRecord(record);
         const key = `${getKey(record)}:${index}`;
+        const fullPath = getRecordFullPath(record);
+        const folderPath = getRecordFolderPath(record);
+        const pathText = folder ? `目录：${formatDisplayPath(fullPath)}` : `所在目录：${formatDisplayPath(folderPath)}`;
+        const titleText = `${name}\n${pathText}\n完整路径：${formatDisplayPath(fullPath)}`;
+        const pathMeta = isHomeList
+          ? ""
+          : `<div class="file-path" title="${escapeAttribute(titleText)}">${escapeHtml(pathText)}</div>`;
         return `
-          <div class="file-row ${folder ? "is-folder" : ""}" data-index="${index}" data-key="${escapeHtml(key)}">
+          <div class="file-row ${folder ? "is-folder" : ""}" data-index="${index}" data-key="${escapeHtml(key)}" title="${escapeAttribute(titleText)}" aria-label="${escapeAttribute(titleText)}">
             ${folder ? folderIcon : fileIcon}
-            <div class="file-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
+            <div class="file-detail">
+              <div class="file-name" title="${escapeAttribute(titleText)}">${escapeHtml(name)}</div>
+              ${pathMeta}
+            </div>
           </div>`;
       })
       .join("");
@@ -965,6 +1006,10 @@
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
+  }
+
+  function escapeAttribute(value) {
+    return escapeHtml(value).replace(/'/g, "&#39;");
   }
 
   function escapeRegExp(value) {
