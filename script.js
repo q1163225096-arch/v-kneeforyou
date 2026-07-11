@@ -700,24 +700,35 @@
       return { data: results, more: true };
     }
 
-    const chunksToScan = Math.min(
+    const initialChunksToScan = Math.min(
       manifest.chunks.length,
       Math.max(1, Math.ceil(limit / PAGE_SIZE)) * SEARCH_CHUNKS_PER_PAGE
     );
 
-    const chunkRows = await Promise.all(
-      selectSearchChunks(manifest.chunks, chunksToScan).map((chunk) => loadSearchChunk(chunk).catch(() => []))
-    );
-    for (const rows of chunkRows) {
-      for (const item of rows) {
-        if (!searchItemMatches(item, needles, matchesSiteKeyword)) continue;
-        if (addResult(expandSearchItem(item))) {
-          return { data: results.slice(0, limit), more: true };
+    const orderedChunks = selectSearchChunks(manifest.chunks, manifest.chunks.length);
+    let chunksScanned = 0;
+    let chunksToScan = initialChunksToScan;
+
+    while (chunksScanned < orderedChunks.length) {
+      const chunkRows = await Promise.all(
+        orderedChunks.slice(chunksScanned, chunksToScan).map((chunk) => loadSearchChunk(chunk).catch(() => []))
+      );
+      chunksScanned = chunksToScan;
+
+      for (const rows of chunkRows) {
+        for (const item of rows) {
+          if (!searchItemMatches(item, needles, matchesSiteKeyword)) continue;
+          if (addResult(expandSearchItem(item))) {
+            return { data: results.slice(0, limit), more: true };
+          }
         }
       }
+
+      if (results.length > 0 || chunksScanned >= orderedChunks.length) break;
+      chunksToScan = Math.min(orderedChunks.length, chunksScanned + SEARCH_CHUNKS_PER_PAGE);
     }
 
-    return { data: results, more: chunksToScan < manifest.chunks.length };
+    return { data: results, more: chunksScanned < orderedChunks.length };
   }
 
   async function loadLocalSearchRecords() {
