@@ -9,6 +9,7 @@
   const PARENT_INDEX_BUCKETS = 32;
   const SEARCH_MANIFEST_URL = `./data/search-manifest.json?v=${SEARCH_INDEX_VERSION}`;
   const SEARCH_CHUNKS_PER_PAGE = 10;
+  const SEARCH_INITIAL_TIME_BUDGET_MS = 8000;
   const DIRTS_DIRECT_URL = "https://path.dirts.cn/suda/server/front/business/path/file/list";
   const DIRTS_DIRECT_AUTH = "65516aa4f5cc9c2681bf791c4593020c679ca8a6165030a6c26429ebac1dc2f4";
   const fileLikeExtensionPattern =
@@ -674,8 +675,9 @@
     return textMatchesNeedles(getSearchItemText(item), needles);
   }
 
-  async function searchStaticChunks(limit) {
+  async function searchStaticChunks(limit, minResults = 1) {
     const manifest = await loadSearchManifest();
+    const startedAt = Date.now();
     const needle = normalize(state.query);
     const needles = searchNeedles(state.query);
     const matchesSiteKeyword = isSiteKeywordSearch(needle);
@@ -687,7 +689,7 @@
       if (seen.has(key)) return false;
       seen.add(key);
       results.push(record);
-      return results.length > limit;
+      return results.length >= limit;
     }
 
     for (const record of filterRecords(allIndexedRecords())) {
@@ -696,7 +698,7 @@
       }
     }
 
-    if (results.length > 0 && limit <= PAGE_SIZE) {
+    if (results.length >= minResults) {
       return { data: results, more: true };
     }
 
@@ -724,7 +726,8 @@
         }
       }
 
-      if (results.length > 0 || chunksScanned >= orderedChunks.length) break;
+      if (results.length >= minResults || chunksScanned >= orderedChunks.length) break;
+      if (limit <= PAGE_SIZE && Date.now() - startedAt >= SEARCH_INITIAL_TIME_BUDGET_MS) break;
       chunksToScan = Math.min(orderedChunks.length, chunksScanned + SEARCH_CHUNKS_PER_PAGE);
     }
 
@@ -985,7 +988,8 @@
     try {
       if (canUseStaticFiles() && state.scope === "global") {
         const limit = page * PAGE_SIZE;
-        const result = await searchStaticChunks(limit);
+        const previousCount = append && Array.isArray(state.searchResults) ? state.searchResults.length : 0;
+        const result = await searchStaticChunks(limit, append ? previousCount + 1 : 1);
         state.searchResults = result.data;
         state.searchMore = result.more;
         state.searchPage = page;
@@ -1100,6 +1104,7 @@
 
     const records = visibleRecords();
     state.renderedRecords = records;
+    elements.empty.textContent = emptyStateText();
     elements.empty.classList.toggle("is-hidden", records.length > 0);
     const activeFolder = currentFolder();
     const activeFolderPath = !state.searching && activeFolder ? getRecordFullPath(activeFolder.record) : "";
@@ -1142,6 +1147,12 @@
     renderList();
   }
 
+  function emptyStateText() {
+    if (!state.searching) return "暂无数据";
+    if (state.searchMore) return "前面暂时没找到，点击“加载更多”继续深搜";
+    return `没有找到“${state.query}”相关内容`;
+  }
+
   function escapeHtml(value) {
     return String(value || "")
       .replace(/&/g, "&amp;")
@@ -1171,9 +1182,10 @@
     state.searchMore = false;
     state.searchPage = 1;
     if (state.searching) {
+      saveHistoryState(false);
       await runSearch(1, false);
       restoreScrollTop(0);
-      saveHistoryState(false);
+      saveHistoryState(true);
       return;
     }
     render();
@@ -1195,9 +1207,10 @@
       .querySelectorAll(`[data-filter="${filter}"]`)
       .forEach((item) => item.classList.toggle("is-active", item === button));
     if (state.searching && state.query) {
+      saveHistoryState(false);
       await runSearch(1, false);
       restoreScrollTop(0);
-      saveHistoryState(false);
+      saveHistoryState(true);
       return;
     }
     render();
