@@ -7,7 +7,8 @@
   const SEARCH_INDEX_VERSION = "20260624-sync-6-22-6-23";
   const PARENT_INDEX_VERSION = "20260710-parent-3";
   const PARENT_INDEX_BUCKETS = 32;
-  const SEARCH_MANIFEST_URL = `./data/search-manifest.json?v=${SEARCH_INDEX_VERSION}`;
+  const ASSET_BASE = String(window.YYDOCX_ASSET_BASE || ".").replace(/\/+$/, "");
+  const SEARCH_MANIFEST_URL = `${assetUrl("data/search-manifest.json")}?v=${SEARCH_INDEX_VERSION}`;
   const SEARCH_CHUNKS_PER_PAGE = 10;
   const SEARCH_INITIAL_TIME_BUDGET_MS = 8000;
   const DIRTS_DIRECT_URL = "https://path.dirts.cn/suda/server/front/business/path/file/list";
@@ -85,6 +86,11 @@
   const searchChunkCache = new Map();
   const childIndexCache = new Map();
   let restoringHistory = false;
+
+  function assetUrl(path) {
+    const cleanPath = String(path || "").replace(/^\/+/, "");
+    return `${ASSET_BASE}/${cleanPath}`;
+  }
 
   function replaceText(value) {
     return String(value || "").replace(replacementMatcher, "kneeforyou");
@@ -166,7 +172,7 @@
 
   function startParentNamesLoad(pathId) {
     if (!pathId || parentNamesCache.has(pathId) || parentNamesLoading.has(pathId)) return;
-    const url = `./data/parent-index/p${encodeURIComponent(pathId)}-parents.json?v=${PARENT_INDEX_VERSION}`;
+    const url = `${assetUrl(`data/parent-index/p${encodeURIComponent(pathId)}-parents.json`)}?v=${PARENT_INDEX_VERSION}`;
     const loading = fetch(url)
       .then((response) => {
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
@@ -188,7 +194,7 @@
   function startParentIndexLoad(pathId, bucket) {
     const cacheKey = `${pathId}:${bucket}`;
     if (!pathId || !bucket || parentIndexCache.has(cacheKey) || parentIndexLoading.has(cacheKey)) return;
-    const url = `./data/parent-index/p${encodeURIComponent(pathId)}-${bucket}.json?v=${PARENT_INDEX_VERSION}`;
+    const url = `${assetUrl(`data/parent-index/p${encodeURIComponent(pathId)}-${bucket}.json`)}?v=${PARENT_INDEX_VERSION}`;
     const loading = fetch(url)
       .then((response) => {
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
@@ -259,7 +265,7 @@
     if (childFiles[key]) return childFiles[key];
     const file = childIndexFile(key);
     if (!childIndexCache.has(file)) {
-      const response = await fetch(`./data/child-index/${file}?v=${CHILD_INDEX_VERSION}`);
+      const response = await fetch(`${assetUrl(`data/child-index/${file}`)}?v=${CHILD_INDEX_VERSION}`);
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
       const json = await response.json();
       childIndexCache.set(file, json && typeof json === "object" ? json : {});
@@ -598,7 +604,7 @@
       searchChunkCache.set(
         file,
         (async () => {
-          const response = await fetch(`./data/${file}?v=${SEARCH_INDEX_VERSION}`);
+          const response = await fetch(`${assetUrl(`data/${file}`)}?v=${SEARCH_INDEX_VERSION}`);
           if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
           const json = await response.json();
           return Array.isArray(json) ? json : Array.isArray(json.data) ? json.data : [];
@@ -740,7 +746,7 @@
     localSearchRecordsPromise = (async () => {
       if (canUseStaticFiles()) {
         try {
-          const response = await fetch(`./data/search-index.json?v=${SEARCH_INDEX_VERSION}`);
+          const response = await fetch(`${assetUrl("data/search-index.json")}?v=${SEARCH_INDEX_VERSION}`);
           if (response.ok) {
             const json = await response.json();
             return Array.isArray(json) ? json : Array.isArray(json.data) ? json.data : allIndexedRecords();
@@ -845,7 +851,7 @@
       try {
         const childFile = childFiles[key] || (await indexedChildFile(key));
         if (childFile) {
-          const response = await fetch(`./data/${childFile}`);
+          const response = await fetch(assetUrl(`data/${childFile}`));
           if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
           const json = await response.json();
           const entry = normalizeStaticEntry(record, json);
