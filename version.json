@@ -1,8 +1,8 @@
 {
-  "build": "deep-cache-132946",
-  "childFiles": 132946,
+  "build": "deep-cache-133879",
+  "childFiles": 133879,
   "zipHint": "upload C:/Users/Administrator/Desktop/网课-netlify.zip",
-  "updatedAt": "2026-06-24T02:58:23.368Z",
+  "updatedAt": "2026-08-20T00:48:28.584Z",
   "yydocxFilled": {
     "writtenLatest": 1869,
     "failedLatest": 1899,
@@ -76,24 +76,19 @@
   },
   "syncedRoots": {
     "names": [
-      "6-22",
-      "6-23"
+      "26-08-17"
     ],
     "sourceRoots": [
       {
-        "name": "6-22",
-        "key": "21356:612968310753492"
-      },
-      {
-        "name": "6-23",
-        "key": "21357:83263881958397"
+        "name": "26-08-17",
+        "key": "21843:328177856386265"
       }
     ],
-    "fetchedDirectories": 2050,
-    "childFilesWritten": 2050,
-    "rowsFetched": 49068,
-    "searchTotal": 3192352,
-    "searchChunks": 639,
-    "updatedAt": "2026-06-24T02:58:23.368Z"
+    "fetchedDirectories": 933,
+    "childFilesWritten": 933,
+    "rowsFetched": 21255,
+    "searchTotal": 3213608,
+    "searchChunks": 643,
+    "updatedAt": "2026-08-20T00:48:28.584Z"
   }
 }
