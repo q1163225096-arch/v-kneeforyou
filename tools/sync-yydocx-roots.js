@@ -19,6 +19,7 @@ const pageSize = 20000;
 const chunkSize = 5000;
 const concurrency = 12;
 const targets = process.argv.slice(2);
+const cacheVersion = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
 
 if (!targets.length) {
   console.error("Usage: node tools/sync-yydocx-roots.js <root-name> [root-name...]");
@@ -173,6 +174,26 @@ function writeBootstrap() {
   fs.writeFileSync(bootstrapJs, `window.YYDOCX_DATA = ${JSON.stringify(bootstrap)};\n`);
 }
 
+function writeClientCacheVersion() {
+  const indexPath = path.join(root, "index.html");
+  const scriptPath = path.join(root, "script.js");
+  const index = fs.readFileSync(indexPath, "utf8");
+  const script = fs.readFileSync(scriptPath, "utf8");
+  const nextIndex = index
+    .replace(/(data\/bootstrap-data\.js\?v=)[^"]+/, `$1${cacheVersion}`)
+    .replace(/(\.\/script\.js\?v=)[^"]+/, `$1${cacheVersion}`);
+  const nextScript = script
+    .replace(/const SEARCH_INDEX_VERSION = "[^"]+";/, `const SEARCH_INDEX_VERSION = "${cacheVersion}";`)
+    .replace(/const CHILD_INDEX_VERSION = "[^"]+";/, `const CHILD_INDEX_VERSION = "${cacheVersion}";`);
+
+  if (nextIndex === index || nextScript === script) {
+    throw new Error("Unable to update client cache version");
+  }
+
+  fs.writeFileSync(indexPath, nextIndex);
+  fs.writeFileSync(scriptPath, nextScript);
+}
+
 function writeChildIndex() {
   fs.mkdirSync(childIndexDir, { recursive: true });
   const buckets = Array.from({ length: 256 }, () => ({}));
@@ -218,7 +239,7 @@ function writeSearchChunks(rows) {
   const dirts = rows.reduce((count, item) => count + (Array.isArray(item) && item[0] === 1 ? 1 : 0), 0);
   const manifest = {
     format: "search-manifest-v1",
-    version: "20260624-sync-6-22-6-23",
+    version: cacheVersion,
     total: rows.length,
     folders,
     files: rows.length - folders - dirts,
@@ -244,6 +265,7 @@ function writeVersion(extra) {
   version.syncedRoots = {
     names: targets,
     ...extra,
+    cacheVersion,
     updatedAt: version.updatedAt,
   };
   fs.writeFileSync(versionJson, `${JSON.stringify(version, null, 2)}\n`);
@@ -317,6 +339,7 @@ async function main() {
   const existingSearchRows = readSearchRows().filter((item) => !refreshedPathIds.has(compactItemPathId(item)));
   const searchRows = existingSearchRows.concat(allSearchRecords.map(compactRecord));
   const manifest = writeSearchChunks(searchRows);
+  writeClientCacheVersion();
   writeVersion({
     sourceRoots: sourceRoots.map((record) => ({ name: recordName(record), key: recordKey(record) })),
     fetchedDirectories: stats.fetched,

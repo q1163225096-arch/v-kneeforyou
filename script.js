@@ -4,7 +4,7 @@
   const childrenMap = data.children || {};
   const childFiles = data.childFiles || {};
   const PAGE_SIZE = 500;
-  const SEARCH_INDEX_VERSION = "20260624-sync-6-22-6-23";
+  const SEARCH_INDEX_VERSION = "20260820-26-08-17";
   const PARENT_INDEX_VERSION = "20260710-parent-3";
   const PARENT_INDEX_BUCKETS = 32;
   const ASSET_BASE = String(window.YYDOCX_ASSET_BASE || ".").replace(/\/+$/, "");
@@ -79,7 +79,7 @@
   const parentNamesCache = new Map();
   const parentNamesLoading = new Map();
   const HISTORY_KEY = "yydocx-state-v2";
-  const CHILD_INDEX_VERSION = "20260624-sync-6-22-6-23";
+  const CHILD_INDEX_VERSION = "20260820-26-08-17";
   let indexedRecordsCache = null;
   let localSearchRecordsPromise = null;
   let searchManifestPromise = null;
