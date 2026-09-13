@@ -4,7 +4,9 @@
   const childrenMap = data.children || {};
   const childFiles = data.childFiles || {};
   const PAGE_SIZE = 500;
-  const SEARCH_INDEX_VERSION = "20260820-26-08-17";
+  const DIRECTORY_PAGE_SIZE = 200;
+  const CLIENT_VERSION = "20260913-search-2";
+  const SEARCH_INDEX_VERSION = "20260913-self-use-flat";
   const PARENT_INDEX_VERSION = "20260710-parent-3";
   const PARENT_INDEX_BUCKETS = 32;
   const ASSET_BASE = String(window.YYDOCX_ASSET_BASE || ".").replace(/\/+$/, "");
@@ -27,6 +29,7 @@
     searchResults: null,
     searchMore: false,
     searchPage: 1,
+    directoryPage: 1,
     renderedRecords: [],
   };
 
@@ -79,7 +82,29 @@
   const parentNamesCache = new Map();
   const parentNamesLoading = new Map();
   const HISTORY_KEY = "yydocx-state-v2";
-  const CHILD_INDEX_VERSION = "20260820-26-08-17";
+  const CHILD_INDEX_VERSION = "20260913-self-use-flat";
+  const selfUseBuckets = new Map();
+  let searchWorker = null;
+  let searchWorkerRequest = 0;
+  let pendingFastSearch = null;
+  let searchGeneration = 0;
+  let legacySearchController = null;
+
+  function fetchWithTimeout(url, options = {}) {
+    const timeout = AbortSignal.timeout(15000);
+    const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+    return fetch(url, { ...options, signal });
+  }
+
+  function cancelSearch() {
+    if (legacySearchController) legacySearchController.abort();
+    if (pendingFastSearch) {
+      clearTimeout(pendingFastSearch.timer);
+      pendingFastSearch.reject(new DOMException("Superseded", "AbortError"));
+      pendingFastSearch = null;
+    }
+    if (searchWorker) searchWorker.postMessage({ id: ++searchWorkerRequest, cancel: true });
+  }
   let indexedRecordsCache = null;
   let localSearchRecordsPromise = null;
   let searchManifestPromise = null;
@@ -104,7 +129,7 @@
     if (!nameCache.has(record)) {
       nameCache.set(
         record,
-        replaceText(record.title || record.displayName || record.associationFileName || record.serverFileName || record.name || "未命名")
+        (record.pathId === "local-self-use" ? String : replaceText)(record.title || record.displayName || record.associationFileName || record.serverFileName || record.name || "未命名")
       );
     }
     return nameCache.get(record);
@@ -113,7 +138,7 @@
   function getPath(record) {
     if (!record || typeof record !== "object") return "/";
     if (!pathCache.has(record)) {
-      pathCache.set(record, replaceText(record.associationFilePath || record.path || "/"));
+      pathCache.set(record, (record.pathId === "local-self-use" ? String : replaceText)(record.associationFilePath || record.path || "/"));
     }
     return pathCache.get(record);
   }
@@ -173,7 +198,7 @@
   function startParentNamesLoad(pathId) {
     if (!pathId || parentNamesCache.has(pathId) || parentNamesLoading.has(pathId)) return;
     const url = `${assetUrl(`data/parent-index/p${encodeURIComponent(pathId)}-parents.json`)}?v=${PARENT_INDEX_VERSION}`;
-    const loading = fetch(url)
+    const loading = fetchWithTimeout(url)
       .then((response) => {
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
         return response.json();
@@ -195,7 +220,7 @@
     const cacheKey = `${pathId}:${bucket}`;
     if (!pathId || !bucket || parentIndexCache.has(cacheKey) || parentIndexLoading.has(cacheKey)) return;
     const url = `${assetUrl(`data/parent-index/p${encodeURIComponent(pathId)}-${bucket}.json`)}?v=${PARENT_INDEX_VERSION}`;
-    const loading = fetch(url)
+    const loading = fetchWithTimeout(url)
       .then((response) => {
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
         return response.json();
@@ -220,6 +245,7 @@
   }
 
   function getIndexedParentFolderPath(record) {
+    if (record.pathId === "local-self-use" && record.associationFilePath) return "";
     if (!state.searching || isFolderRecord(record) || looksLikeDirectory(record)) return "";
     const parts = parentLookupParts(record);
     if (!parts) return "";
@@ -265,7 +291,7 @@
     if (childFiles[key]) return childFiles[key];
     const file = childIndexFile(key);
     if (!childIndexCache.has(file)) {
-      const response = await fetch(`${assetUrl(`data/child-index/${file}`)}?v=${CHILD_INDEX_VERSION}`);
+      const response = await fetchWithTimeout(`${assetUrl(`data/child-index/${file}`)}?v=${CHILD_INDEX_VERSION}`);
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
       const json = await response.json();
       childIndexCache.set(file, json && typeof json === "object" ? json : {});
@@ -314,6 +340,7 @@
 
   function isFolderRecord(record) {
     if (!record) return false;
+    if (record.pathId === "local-self-use") return Boolean(record.isDir);
     if (looksLikeFile(record)) return false;
     const namedDirectory = looksLikeDirectory(record);
     if (!record.isDir && !namedDirectory) return false;
@@ -404,6 +431,7 @@
       searchResults: Array.isArray(state.searchResults) ? state.searchResults.map(copyRecord) : null,
       searchMore: state.searchMore,
       searchPage: state.searchPage,
+      directoryPage: state.directoryPage,
       scrollTop: currentScrollTop(),
     };
   }
@@ -447,6 +475,8 @@
 
   async function restoreFromHistory(historyState) {
     if (!historyState || historyState.key !== HISTORY_KEY) return;
+    searchGeneration++;
+    cancelSearch();
     restoringHistory = true;
     state.stack = Array.isArray(historyState.stack)
       ? historyState.stack.map((folder) => ({
@@ -462,6 +492,7 @@
     state.searchResults = Array.isArray(historyState.searchResults) ? historyState.searchResults : null;
     state.searchMore = Boolean(historyState.searchMore);
     state.searchPage = historyState.searchPage || 1;
+    state.directoryPage = historyState.directoryPage || 1;
     state.loading = false;
     state.loadingMore = false;
     elements.input.value = state.query;
@@ -587,7 +618,7 @@
   async function loadSearchManifest() {
     if (!searchManifestPromise) {
       searchManifestPromise = (async () => {
-        const response = await fetch(SEARCH_MANIFEST_URL);
+        const response = await fetchWithTimeout(SEARCH_MANIFEST_URL);
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
         const manifest = await response.json();
         if (!manifest || !Array.isArray(manifest.chunks)) throw new Error("invalid search manifest");
@@ -604,7 +635,7 @@
       searchChunkCache.set(
         file,
         (async () => {
-          const response = await fetch(`${assetUrl(`data/${file}`)}?v=${SEARCH_INDEX_VERSION}`);
+          const response = await fetchWithTimeout(`${assetUrl(`data/${file}`)}?v=${SEARCH_INDEX_VERSION}`);
           if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
           const json = await response.json();
           return Array.isArray(json) ? json : Array.isArray(json.data) ? json.data : [];
@@ -669,6 +700,7 @@
       category: item[3] || 0,
       size: item[4] || 0,
       pathId: item[5],
+      associationFilePath: typeof item[6] === "string" ? item[6] : undefined,
       associationType: item[2] ? 1 : 0,
     };
   }
@@ -681,8 +713,11 @@
     return textMatchesNeedles(getSearchItemText(item), needles);
   }
 
-  async function searchStaticChunks(limit, minResults = 1) {
-    const manifest = await loadSearchManifest();
+  async function searchStaticChunks(limit, minResults = 1, signal) {
+    const manifestResponse = await fetchWithTimeout(SEARCH_MANIFEST_URL, { signal });
+    if (!manifestResponse.ok) throw new Error("Search manifest unavailable");
+    const manifest = await manifestResponse.json();
+    signal?.throwIfAborted();
     const startedAt = Date.now();
     const needle = normalize(state.query);
     const needles = searchNeedles(state.query);
@@ -719,8 +754,14 @@
 
     while (chunksScanned < orderedChunks.length) {
       const chunkRows = await Promise.all(
-        orderedChunks.slice(chunksScanned, chunksToScan).map((chunk) => loadSearchChunk(chunk).catch(() => []))
+        orderedChunks.slice(chunksScanned, chunksToScan).map(async chunk => {
+          const response = await fetchWithTimeout(`${assetUrl(`data/${chunk.file}`)}?v=${SEARCH_INDEX_VERSION}`, { signal });
+          if (!response.ok) throw new Error("Search chunk unavailable");
+          const json = await response.json();
+          return Array.isArray(json) ? json : json.data || [];
+        })
       );
+      signal?.throwIfAborted();
       chunksScanned = chunksToScan;
 
       for (const rows of chunkRows) {
@@ -746,7 +787,7 @@
     localSearchRecordsPromise = (async () => {
       if (canUseStaticFiles()) {
         try {
-          const response = await fetch(`${assetUrl("data/search-index.json")}?v=${SEARCH_INDEX_VERSION}`);
+          const response = await fetchWithTimeout(`${assetUrl("data/search-index.json")}?v=${SEARCH_INDEX_VERSION}`);
           if (response.ok) {
             const json = await response.json();
             return Array.isArray(json) ? json : Array.isArray(json.data) ? json.data : allIndexedRecords();
@@ -802,7 +843,7 @@
   }
 
   async function postJson(url, body, extraHeaders = {}) {
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...extraHeaders },
       body: JSON.stringify(body),
@@ -851,9 +892,23 @@
       try {
         const childFile = childFiles[key] || (await indexedChildFile(key));
         if (childFile) {
-          const response = await fetch(assetUrl(`data/${childFile}`));
-          if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-          const json = await response.json();
+          let json;
+          if (record.pathId === "local-self-use") {
+            if (!selfUseBuckets.has(childFile)) {
+              selfUseBuckets.set(childFile, fetchWithTimeout(`${assetUrl(`data/${childFile}`)}?v=${CHILD_INDEX_VERSION}`).then(async response => {
+                if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+                return response.json();
+              }));
+              if (selfUseBuckets.size > 12) selfUseBuckets.delete(selfUseBuckets.keys().next().value);
+            }
+            try { json = (await selfUseBuckets.get(childFile)).entries[key]; }
+            catch (error) { selfUseBuckets.delete(childFile); throw error; }
+            if (!json) throw new Error("Imported directory missing");
+          } else {
+            const response = await fetchWithTimeout(assetUrl(`data/${childFile}`));
+            if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+            json = await response.json();
+          }
           const entry = normalizeStaticEntry(record, json);
           childrenMap[key] = entry;
           invalidateIndexCache();
@@ -942,13 +997,17 @@
   }
 
   async function openFolder(record) {
+    const generation = ++searchGeneration;
+    cancelSearch();
+    state.directoryPage = 1;
     saveHistoryState(true);
     const entry = await ensureChildren(record);
+    if (generation !== searchGeneration) return;
     if (!entry) {
       render();
       return;
     }
-    if (Array.isArray(entry.data) && entry.data.length === 0 && !entry.more && !isAllowedEmptyFolder(record) && !looksLikeDirectory(record)) {
+    if (record.pathId !== "local-self-use" && Array.isArray(entry.data) && entry.data.length === 0 && !entry.more && !isAllowedEmptyFolder(record) && !looksLikeDirectory(record)) {
       record.isDir = 0;
       if ("isdir" in record) record.isdir = 0;
       showToast("\u5df2\u7ecf\u662f\u6700\u540e\u4e00\u7ea7");
@@ -967,6 +1026,11 @@
   }
 
   function jumpTo(index) {
+    searchGeneration++;
+    cancelSearch();
+    state.directoryPage = 1;
+    state.loading = false;
+    state.loadingMore = false;
     saveHistoryState(true);
     if (index < 0) {
       state.stack = [];
@@ -982,8 +1046,49 @@
     saveHistoryState(false);
   }
 
+  function fastSearch(limit) {
+    if (!searchWorker) {
+      searchWorker = new Worker(`./search-worker.js?v=${CLIENT_VERSION}`);
+      searchWorker.onmessage = event => {
+        const result = event.data;
+        if (!pendingFastSearch || pendingFastSearch.id !== result.id) return;
+        const pending = pendingFastSearch;
+        clearTimeout(pending.timer);
+        pendingFastSearch = null;
+        if (result.error) { const error = new Error(result.error); error.name = result.errorName || "Error"; pending.reject(error); }
+        else pending.resolve({ data: result.data.map(expandSearchItem), more: result.more });
+      };
+      searchWorker.onerror = () => {
+        if (pendingFastSearch) { clearTimeout(pendingFastSearch.timer); pendingFastSearch.reject(new Error("Search worker failed")); }
+        pendingFastSearch = null;
+        searchWorker.terminate();
+        searchWorker = null;
+      };
+    }
+    if (pendingFastSearch) { clearTimeout(pendingFastSearch.timer); pendingFastSearch.reject(new DOMException("Superseded", "AbortError")); }
+    return new Promise((resolve, reject) => {
+      const id = ++searchWorkerRequest;
+      const timer = setTimeout(() => {
+        if (!pendingFastSearch || pendingFastSearch.id !== id) return;
+        pendingFastSearch = null;
+        searchWorker.terminate(); searchWorker = null;
+        reject(new DOMException("Search timed out", "TimeoutError"));
+      }, 47000);
+      pendingFastSearch = { id, resolve, reject, timer };
+      searchWorker.postMessage({ id, base: new URL(assetUrl("data/fast-search"), location.href).href,
+        version: SEARCH_INDEX_VERSION, needles: searchNeedles(state.query), type: state.type,
+        all: isSiteKeywordSearch(state.query), replacements: replacementParts, limit });
+    });
+  }
+
   async function runSearch(page, append) {
+    const generation = ++searchGeneration;
+    cancelSearch();
+    const legacyController = new AbortController();
+    legacySearchController = legacyController;
+    const deadline = setTimeout(() => legacyController.abort(new DOMException("Search timed out", "TimeoutError")), 45000);
     if (!state.query) {
+      clearTimeout(deadline);
       state.searchResults = null;
       return;
     }
@@ -995,7 +1100,14 @@
       if (canUseStaticFiles() && state.scope === "global") {
         const limit = page * PAGE_SIZE;
         const previousCount = append && Array.isArray(state.searchResults) ? state.searchResults.length : 0;
-        const result = await searchStaticChunks(limit, append ? previousCount + 1 : 1);
+        let result;
+        try { result = await fastSearch(limit); }
+        catch (error) {
+          if (generation !== searchGeneration || error.name === "AbortError") return;
+          if (error.name === "TimeoutError") throw error;
+          result = await searchStaticChunks(limit, append ? previousCount + 1 : 1, legacyController.signal);
+        }
+        if (generation !== searchGeneration) return;
         state.searchResults = result.data;
         state.searchMore = result.more;
         state.searchPage = page;
@@ -1003,6 +1115,7 @@
       }
 
       const source = state.scope === "current" ? currentRecords() : await loadLocalSearchRecords();
+      if (generation !== searchGeneration) return;
       const filtered = filterRecords(source);
       const start = (page - 1) * PAGE_SIZE;
       const list = filtered.slice(start, start + PAGE_SIZE);
@@ -1010,13 +1123,17 @@
       state.searchMore = start + PAGE_SIZE < filtered.length;
       state.searchPage = page;
     } catch (error) {
+      if (generation !== searchGeneration || error.name === "AbortError") return;
       state.searchResults = null;
       state.searchMore = false;
-      showToast("搜索索引加载失败，请确认 data 文件夹已完整上传");
+      showToast(error.name === "TimeoutError" ? "搜索超时，请重试或使用更具体的关键词" : "搜索加载失败，请检查网络后重试");
     } finally {
-      state.loading = false;
-      state.loadingMore = false;
-      render();
+      clearTimeout(deadline);
+      if (generation === searchGeneration) {
+        state.loading = false;
+        state.loadingMore = false;
+        render();
+      }
     }
   }
 
@@ -1104,11 +1221,14 @@
     if (state.loading) {
       state.renderedRecords = [];
       elements.empty.classList.add("is-hidden");
-      elements.list.innerHTML = `<div class="loading-row">客官勿急，给你跳个舞，加微信:kneeforyou</div>`;
+      elements.list.innerHTML = `<div class="loading-row">${state.searching ? "正在查找相关文件…" : "正在加载目录…"}</div>`;
       return;
     }
 
-    const records = visibleRecords();
+    const allRecords = visibleRecords();
+    const directoryPages = Math.max(1, Math.ceil(allRecords.length / DIRECTORY_PAGE_SIZE));
+    state.directoryPage = Math.min(Math.max(1, state.directoryPage), directoryPages);
+    const records = state.searching ? allRecords : allRecords.slice((state.directoryPage - 1) * DIRECTORY_PAGE_SIZE, state.directoryPage * DIRECTORY_PAGE_SIZE);
     state.renderedRecords = records;
     elements.empty.textContent = emptyStateText();
     elements.empty.classList.toggle("is-hidden", records.length > 0);
@@ -1141,11 +1261,13 @@
       .join("");
 
     const entry = activeFolder ? childrenMap[activeFolder.key] : null;
-    const hasMore = state.searching ? state.searchMore : Boolean(entry && entry.more);
+    const hasMore = state.searching ? state.searchMore : Boolean(entry && entry.more && state.directoryPage === directoryPages);
     const moreRow = hasMore
       ? `<button class="load-more" type="button" data-action="load-more">${state.loadingMore ? "加载中" : "加载更多"}</button>`
       : "";
-    elements.list.innerHTML = rows + moreRow;
+    const pager = !state.searching && directoryPages > 1
+      ? `<nav aria-label="目录分页"><button class="load-more" data-action="directory-prev" ${state.directoryPage === 1 ? "disabled" : ""}>上一页</button><span>第 ${state.directoryPage} / ${directoryPages} 页 · 共 ${allRecords.length} 项</span><button class="load-more" data-action="directory-next" ${state.directoryPage === directoryPages ? "disabled" : ""}>下一页</button></nav>` : "";
+    elements.list.innerHTML = rows + pager + moreRow;
   }
 
   function render() {
@@ -1183,6 +1305,7 @@
       return;
     }
     state.query = query;
+    if (!query) { searchGeneration++; cancelSearch(); state.loading = false; state.loadingMore = false; }
     state.searching = Boolean(query);
     state.searchResults = null;
     state.searchMore = false;
@@ -1209,6 +1332,7 @@
     const filter = button.dataset.filter;
     const value = button.dataset.value;
     state[filter] = value;
+    state.directoryPage = 1;
     elements.filters
       .querySelectorAll(`[data-filter="${filter}"]`)
       .forEach((item) => item.classList.toggle("is-active", item === button));
@@ -1231,6 +1355,11 @@
   });
 
   elements.list.addEventListener("click", async (event) => {
+    const pageButton = event.target.closest("[data-action^='directory-']");
+    if (pageButton && !pageButton.disabled) {
+      state.directoryPage += pageButton.dataset.action === "directory-next" ? 1 : -1;
+      render(); restoreScrollTop(0); saveHistoryState(true); return;
+    }
     const loadMoreButton = event.target.closest("[data-action='load-more']");
     if (loadMoreButton) {
       await loadMore();
