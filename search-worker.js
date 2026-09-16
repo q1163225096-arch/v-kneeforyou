@@ -70,9 +70,13 @@ async function search(message, job) {
   }
   const tokens=new Set();
   if(!all) for(const needle of needles) {
-    const chars=Array.from(needle);
-    if(chars.length===1) tokens.add('c'+chars[0]);
-    else for(let i=0;i+1<chars.length;i++) tokens.add('b'+chars[i]+chars[i+1]);
+    // Use character postings for candidate selection. Bigram postings are
+    // useful for narrowing a single continuous term, but a query without
+    // spaces can cross a separator in the stored name (for example,
+    // "自我 管理"), making a cross-boundary bigram such as "我管" absent.
+    // Character candidates avoid that false negative; the full normalized
+    // text check below still enforces the exact term match.
+    for(const character of Array.from(needle)) tokens.add('c'+character);
   }
   let candidates=null;
   if(tokens.size) {

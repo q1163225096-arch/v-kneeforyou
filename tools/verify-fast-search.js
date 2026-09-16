@@ -4,7 +4,7 @@ const script=fs.readFileSync(path.join(root,'script.js'),'utf8');
 const replacements=vm.runInNewContext(script.match(/const replacementParts = (\[[\s\S]*?\n  \]);/)[1]);
 const pattern=new RegExp(replacements.map(p=>p.join('')).join('|'),'gi');
 const normalize=s=>String(s||'').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,'');
-const queries=[['0到1拍照','all'],['高营业额必做','file'],['摄影','dir'],['Photoshop','file'],['PS 入门','all'],['a b','dir'],['肯定不存在的目录983745892377','all']].map(([query,type])=>({query,type,needles:query.split(/[^\p{L}\p{N}]+/u).filter(Boolean).map(normalize),expected:[],seen:new Set()}));
+const queries=[['0到1拍照','all'],['高营业额必做','file'],['摄影','dir'],['Photoshop','file'],['PS 入门','all'],['自我管理','all'],['自我 管理','all'],['a b','dir'],['肯定不存在的目录983745892377','all']].map(([query,type])=>({query,type,needles:query.split(/[^\p{L}\p{N}]+/u).filter(Boolean).map(normalize),expected:[],seen:new Set()}));
 const manifest=JSON.parse(fs.readFileSync(path.join(root,'data/search-manifest.json')));
 let scanned=0;
 for(const chunk of manifest.chunks) {

@@ -5,7 +5,7 @@
   const childFiles = data.childFiles || {};
   const PAGE_SIZE = 500;
   const DIRECTORY_PAGE_SIZE = 200;
-  const CLIENT_VERSION = "20260913-search-2";
+  const CLIENT_VERSION = "20260916-search-3";
   const SEARCH_INDEX_VERSION = "20260913-self-use-flat";
   const PARENT_INDEX_VERSION = "20260710-parent-3";
   const PARENT_INDEX_BUCKETS = 32;
