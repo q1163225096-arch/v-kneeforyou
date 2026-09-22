@@ -5,9 +5,13 @@
   const childFiles = data.childFiles || {};
   const PAGE_SIZE = 500;
   const DIRECTORY_PAGE_SIZE = 200;
-  const CLIENT_VERSION = "20260916-search-3";
-  const SEARCH_INDEX_VERSION = "20260913-self-use-flat";
-  const PARENT_INDEX_VERSION = "20260710-parent-3";
+  const CLIENT_VERSION = "20260922-self-use-2";
+  const SITE_SUBTITLE = "网课课程目录搜索";
+  // 站点默认标题（initialize 里会根据 bootstrap 数据再确认一次）。
+  // 与 serveStatic / Netlify Edge Function 注入的分享标题保持一致。
+  let baseTitle = "";
+  const SEARCH_INDEX_VERSION = "20260922-self-use-flat";
+  const PARENT_INDEX_VERSION = "20260922-self-use-flat";
   const PARENT_INDEX_BUCKETS = 32;
   const ASSET_BASE = String(window.YYDOCX_ASSET_BASE || ".").replace(/\/+$/, "");
   const SEARCH_MANIFEST_URL = `${assetUrl("data/search-manifest.json")}?v=${SEARCH_INDEX_VERSION}`;
@@ -31,6 +35,7 @@
     searchPage: 1,
     directoryPage: 1,
     renderedRecords: [],
+    savedSearch: null,
   };
 
   const elements = {
@@ -82,13 +87,37 @@
   const parentNamesCache = new Map();
   const parentNamesLoading = new Map();
   const HISTORY_KEY = "yydocx-state-v2";
-  const CHILD_INDEX_VERSION = "20260913-self-use-flat";
+  const CHILD_INDEX_VERSION = "20260922-self-use-flat";
   const selfUseBuckets = new Map();
   let searchWorker = null;
   let searchWorkerRequest = 0;
   let pendingFastSearch = null;
   let searchGeneration = 0;
   let legacySearchController = null;
+
+  // ---- 旧浏览器兼容（微信内置浏览器 / iOS 17.4 以下 / Chrome 116 以下）----
+  // AbortSignal.timeout 需要 Chrome 103+，AbortSignal.any 需要 Chrome 116+，
+  // 缺失时 fetchWithTimeout 会直接抛错导致所有搜索失败。这里补上等价实现。
+  if (typeof AbortSignal !== "undefined") {
+    if (!AbortSignal.timeout) {
+      AbortSignal.timeout = (ms) => {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(new DOMException("signal timed out", "TimeoutError")), ms);
+        return controller.signal;
+      };
+    }
+    if (!AbortSignal.any) {
+      AbortSignal.any = (signals) => {
+        const controller = new AbortController();
+        for (const signal of signals) {
+          if (!signal) continue;
+          if (signal.aborted) { controller.abort(signal.reason); break; }
+          signal.addEventListener("abort", () => controller.abort(signal.reason), { once: true });
+        }
+        return controller.signal;
+      };
+    }
+  }
 
   function fetchWithTimeout(url, options = {}) {
     const timeout = AbortSignal.timeout(15000);
@@ -432,6 +461,18 @@
       searchMore: state.searchMore,
       searchPage: state.searchPage,
       directoryPage: state.directoryPage,
+      savedSearch: state.savedSearch
+        ? {
+            query: state.savedSearch.query,
+            type: state.savedSearch.type,
+            scope: state.savedSearch.scope,
+            searchResults: Array.isArray(state.savedSearch.searchResults)
+              ? state.savedSearch.searchResults.map(copyRecord)
+              : null,
+            searchMore: state.savedSearch.searchMore,
+            searchPage: state.savedSearch.searchPage,
+          }
+        : null,
       scrollTop: currentScrollTop(),
     };
   }
@@ -457,6 +498,18 @@
           url.searchParams.set("scope", state.scope);
         }
         if (state.searchPage > 1) url.searchParams.set("page", String(state.searchPage));
+      } else if (state.savedSearch && state.savedSearch.query && state.stack.length > 0) {
+        // Browsing a folder opened from search results: keep the search query in
+        // the URL (plus the folder path) so the link can be reopened later.
+        url.searchParams.set("q", state.savedSearch.query);
+        const path = state.stack.map((folder) => folder.name).join("/");
+        if (path) url.searchParams.set("path", path);
+        if (state.savedSearch.type && state.savedSearch.type !== "all") {
+          url.searchParams.set("type", state.savedSearch.type);
+        }
+        if (state.savedSearch.searchPage > 1) {
+          url.searchParams.set("page", String(state.savedSearch.searchPage));
+        }
       }
       return url.href;
     } catch (error) {
@@ -493,6 +546,19 @@
     state.searchMore = Boolean(historyState.searchMore);
     state.searchPage = historyState.searchPage || 1;
     state.directoryPage = historyState.directoryPage || 1;
+    state.savedSearch =
+      historyState.savedSearch && historyState.savedSearch.query
+        ? {
+            query: historyState.savedSearch.query,
+            type: historyState.savedSearch.type || "all",
+            scope: historyState.savedSearch.scope || "global",
+            searchResults: Array.isArray(historyState.savedSearch.searchResults)
+              ? historyState.savedSearch.searchResults
+              : null,
+            searchMore: Boolean(historyState.savedSearch.searchMore),
+            searchPage: historyState.savedSearch.searchPage || 1,
+          }
+        : null;
     state.loading = false;
     state.loadingMore = false;
     elements.input.value = state.query;
@@ -532,9 +598,10 @@
         type: ["all", "dir", "file"].includes(type) ? type : "all",
         scope: ["global", "current"].includes(scope) ? scope : "global",
         page: Number.isFinite(page) && page > 1 ? page : 1,
+        path: (params.get("path") || "").trim(),
       };
     } catch (error) {
-      return { query: "", type: "all", scope: "global", page: 1 };
+      return { query: "", type: "all", scope: "global", page: 1, path: "" };
     }
   }
 
@@ -724,6 +791,35 @@
     const matchesSiteKeyword = isSiteKeywordSearch(needle);
     const results = [];
     const seen = new Set();
+    // Keep-first dedup of folder rows (mirrors the fast-search build filter).
+    // Only rows carrying an inline path can be checked here; rows without one
+    // are always kept.
+    const folderKeys = new Set();
+    const parentDirName = p => {
+      const s = String(p || "");
+      const i = s.lastIndexOf("/");
+      return i <= 0 ? "/" : s.slice(0, i);
+    };
+    const duplicateFolder = item => {
+      const remote = item[0] === 1;
+      const isDir = remote ? Boolean(item[6]) : Boolean(item[2]);
+      if (!isDir) return false;
+      let parentKey = null;
+      let name = null;
+      if (remote) {
+        parentKey = `p${item[4]}:${parentDirName(item[2])}`;
+        name = item[1];
+      } else if (item[5] === "local-self-use" && typeof item[6] === "string" && item[6]) {
+        parentKey = `pselfuse:${parentDirName(item[6])}`;
+        name = item[0];
+      } else {
+        return false;
+      }
+      const key = `${parentKey}:${normalize(name)}`;
+      if (folderKeys.has(key)) return true;
+      folderKeys.add(key);
+      return false;
+    };
 
     function addResult(record) {
       const key = `${getKey(record)}:${normalize(getSearchableText(record))}`;
@@ -735,12 +831,12 @@
 
     for (const record of filterRecords(allIndexedRecords())) {
       if (addResult(record)) {
-        return { data: results.slice(0, limit), more: true };
+        return { data: foldersFirstRecords(results).slice(0, limit), more: true };
       }
     }
 
     if (results.length >= minResults) {
-      return { data: results, more: true };
+      return { data: foldersFirstRecords(results), more: true };
     }
 
     const initialChunksToScan = Math.min(
@@ -766,19 +862,23 @@
 
       for (const rows of chunkRows) {
         for (const item of rows) {
+          if (duplicateFolder(item)) continue;
           if (!searchItemMatches(item, needles, matchesSiteKeyword)) continue;
           if (addResult(expandSearchItem(item))) {
-            return { data: results.slice(0, limit), more: true };
+            return { data: foldersFirstRecords(results).slice(0, limit), more: true };
           }
         }
       }
 
       if (results.length >= minResults || chunksScanned >= orderedChunks.length) break;
-      if (limit <= PAGE_SIZE && Date.now() - startedAt >= SEARCH_INITIAL_TIME_BUDGET_MS) break;
+      // 8 秒预算只在"已经有结果"时生效：一个结果都没有的冷门关键词
+      // （回退路径多在旧设备/慢网络触发）继续扫描，直到外层 45 秒限制，
+      // 否则会被误判为"没有匹配结果"。
+      if (results.length && limit <= PAGE_SIZE && Date.now() - startedAt >= SEARCH_INITIAL_TIME_BUDGET_MS) break;
       chunksToScan = Math.min(orderedChunks.length, chunksScanned + SEARCH_CHUNKS_PER_PAGE);
     }
 
-    return { data: results, more: chunksScanned < orderedChunks.length };
+    return { data: foldersFirstRecords(results), more: chunksScanned < orderedChunks.length };
   }
 
   async function loadLocalSearchRecords() {
@@ -800,6 +900,12 @@
     })();
 
     return localSearchRecordsPromise;
+  }
+
+  // Stable partition: folders first, files after; relative order preserved.
+  function foldersFirstRecords(list) {
+    list.sort((a, b) => (isFolderRecord(b) ? 1 : 0) - (isFolderRecord(a) ? 1 : 0));
+    return list;
   }
 
   function filterRecords(records) {
@@ -996,11 +1102,176 @@
     }));
   }
 
+  // Resolve a folder's own full path: prefer the inline path on the record,
+  // fall back to the parent-index name table (indexed by fileId -> full path).
+  async function resolveFolderFullPath(record) {
+    if (record && (record.associationFilePath || record.path)) {
+      const owned = normalizeDisplayPath(getPath(record));
+      if (owned && owned !== "/") return owned;
+    }
+    const parts = parentLookupParts(record);
+    if (!parts) return "";
+    const names = await ensureParentNames(parts.pathId);
+    if (names && names[Number(parts.fileId)] != null) {
+      return normalizeDisplayPath(`/${names[Number(parts.fileId)]}`);
+    }
+    return "";
+  }
+
+  function ensureParentNames(pathId) {
+    if (!pathId) return Promise.resolve(null);
+    if (parentNamesCache.has(pathId)) return Promise.resolve(parentNamesCache.get(pathId));
+    startParentNamesLoad(pathId);
+    const loading = parentNamesLoading.get(pathId);
+    if (!loading) return Promise.resolve(parentNamesCache.get(pathId) || null);
+    return loading.then(() => parentNamesCache.get(pathId)).catch(() => null);
+  }
+
+  async function ensureParentBucket(pathId, fileId) {
+    const bucket = parentIndexBucket(fileId);
+    const cacheKey = `${pathId}:${bucket}`;
+    if (!parentIndexCache.has(cacheKey)) {
+      startParentIndexLoad(pathId, bucket);
+      const loading = parentIndexLoading.get(cacheKey);
+      if (loading) await loading.catch(() => null);
+    }
+    return parentIndexCache.get(cacheKey) || null;
+  }
+
+  // Rebuild the FULL ancestor chain (root partition -> immediate parent) for a
+  // folder opened from search results, so the breadcrumb shows every level.
+  // Resolution order:
+  //   1. inline path on the record;
+  //   2. parent-index name table (fileId -> own full path);
+  //   3. walk up the parent chain until an ancestor with a known full path is
+  //      found — that single path covers every level above it;
+  //   4. last resort: anchor at the record's root partition.
+  // Ancestors are resolved bottom-up against real directory data; when a level
+  // cannot be matched (missing data), a display-only virtual record is used.
+  async function buildAncestorChain(record) {
+    let fullPath = "";
+    if (record.associationFilePath || record.path) {
+      fullPath = normalizeDisplayPath(getPath(record));
+    }
+    const parts = parentLookupParts(record);
+    if ((!fullPath || fullPath === "/") && parts) {
+      const names = await ensureParentNames(parts.pathId);
+      if (names && names[Number(parts.fileId)] != null && names[Number(parts.fileId)] !== "") {
+        fullPath = normalizeDisplayPath(`/${names[Number(parts.fileId)]}`);
+      } else if (names) {
+        let id = Number(parts.fileId);
+        const guard = new Set();
+        while (Number.isFinite(id) && !guard.has(id) && guard.size < 24) {
+          guard.add(id);
+          const lookup = await ensureParentBucket(parts.pathId, String(id));
+          const parent = lookup ? lookup[String(id)] : null;
+          if (parent == null || !Number.isFinite(Number(parent))) break;
+          id = Number(parent);
+          if (names[id] != null && names[id] !== "") {
+            fullPath = normalizeDisplayPath(`/${names[id]}`);
+            break;
+          }
+        }
+      }
+    }
+    if (!fullPath || fullPath === "/") {
+      const rootRec =
+        rootRecords.find((r) => String(r.pathId) === String(record.pathId)) ||
+        rootRecords.find((r) => record.provider === "dirts" && String(r.rootId || r.id) === String(record.rootId || record.id));
+      if (rootRec && getKey(rootRec) !== getKey(record)) {
+        return [{ key: getKey(rootRec), name: getName(rootRec), record: rootRec }];
+      }
+      return [];
+    }
+    const ownName = normalize(getName(record));
+    let segments = fullPath.split("/").filter(Boolean);
+    while (segments.length && normalize(segments[segments.length - 1]) === ownName) {
+      segments = segments.slice(0, -1);
+    }
+    if (!segments.length) return [];
+    const chain = [];
+    let prefix = "";
+    for (let i = 0; i < segments.length; i += 1) {
+      const segment = segments[i];
+      prefix = `${prefix}/${segment}`;
+      let rec = null;
+      if (i === 0) {
+        rec = rootRecords.find(
+          (r) => normalize(getName(r)) === normalize(segment) || normalizeDisplayPath(getPath(r)) === prefix
+        );
+      }
+      if (!rec && chain.length) {
+        const entry = await ensureChildren(chain[chain.length - 1].record);
+        const data = entry && Array.isArray(entry.data) ? entry.data : [];
+        rec =
+          data.find((r) => isFolderRecord(r) && normalize(getName(r)) === normalize(segment)) ||
+          data.find((r) => normalize(getName(r)) === normalize(segment)) ||
+          null;
+      }
+      if (!rec) {
+        rec = {
+          associationFileName: segment,
+          associationFilePath: prefix,
+          pathId: record.pathId,
+          provider: record.provider,
+          rootId: record.rootId,
+          associationFileId: record.pathId ? `virtual-${i}` : undefined,
+          path: record.provider ? prefix : undefined,
+          isDir: 1,
+          associationType: 1,
+          virtualLevel: i,
+        };
+      }
+      chain.push({ key: getKey(rec), name: getName(rec), record: rec });
+    }
+    return chain;
+  }
+
+  // URL for opening a search-result folder in a new tab: the search query plus
+  // the folder path, so the new page restores the search and enters the folder.
+  function searchFolderTargetUrl(record) {
+    const url = new URL(window.location.href);
+    url.search = "";
+    url.searchParams.set("q", state.query);
+    let path = "";
+    if (record.associationFilePath || record.path) {
+      path = normalizeDisplayPath(getPath(record)).replace(/^\/+/, "");
+    }
+    const ownName = normalize(getName(record));
+    const segments = path.split("/").filter(Boolean);
+    if (!segments.length || normalize(segments[segments.length - 1]) !== ownName) {
+      // Inline path missing or doesn't end with the folder name — fall back to
+      // the folder name alone; the opened page rebuilds the full chain.
+      path = getName(record);
+    }
+    url.searchParams.set("path", path);
+    if (state.type && state.type !== "all") url.searchParams.set("type", state.type);
+    if (state.searchPage > 1) url.searchParams.set("page", String(state.searchPage));
+    return url.href;
+  }
+
   async function openFolder(record) {
     const generation = ++searchGeneration;
     cancelSearch();
     state.directoryPage = 1;
     saveHistoryState(true);
+    if (state.searching && state.query) {
+      state.savedSearch = {
+        query: state.query,
+        type: state.type,
+        scope: state.scope,
+        searchResults: state.searchResults,
+        searchMore: state.searchMore,
+        searchPage: state.searchPage,
+      };
+      state.searching = false;
+      state.searchResults = null;
+      state.query = "";
+      elements.input.value = "";
+      const chain = await buildAncestorChain(record);
+      if (generation !== searchGeneration) return;
+      state.stack.push(...chain);
+    }
     const entry = await ensureChildren(record);
     if (generation !== searchGeneration) return;
     if (!entry) {
@@ -1015,17 +1286,14 @@
       return;
     }
     const key = getKey(record);
-    state.stack.push({ key, name: getName(record), record });
-    state.query = "";
-    state.searching = false;
     state.searchResults = null;
-    elements.input.value = "";
+    state.stack.push({ key, name: getName(record), record });
     render();
     restoreScrollTop(0);
     saveHistoryState(false);
   }
 
-  function jumpTo(index) {
+  async function jumpTo(index) {
     searchGeneration++;
     cancelSearch();
     state.directoryPage = 1;
@@ -1041,9 +1309,46 @@
     state.query = "";
     state.searchResults = null;
     elements.input.value = "";
+    const target = currentFolder();
+    if (target && target.record && !childrenMap[target.key]) {
+      // Ancestor levels reached via a full breadcrumb chain may not have their
+      // directory data loaded yet — fetch them so the level is not empty.
+      const entry = await ensureChildren(target.record);
+      if (!entry) render();
+    }
     render();
     restoreScrollTop(0);
     saveHistoryState(false);
+  }
+
+  // Jump back to the search results that led to the current folder view.
+  async function returnToSavedSearch() {
+    const saved = state.savedSearch;
+    if (!saved || !saved.query) return;
+    searchGeneration++;
+    cancelSearch();
+    state.savedSearch = null;
+    state.stack = [];
+    state.directoryPage = 1;
+    state.loading = false;
+    state.loadingMore = false;
+    state.query = saved.query;
+    state.type = saved.type || "all";
+    state.scope = saved.scope || "global";
+    state.searching = true;
+    state.searchResults = Array.isArray(saved.searchResults) ? saved.searchResults : null;
+    state.searchMore = Boolean(saved.searchMore);
+    state.searchPage = saved.searchPage || 1;
+    elements.input.value = state.query;
+    syncFilterControls();
+    saveHistoryState(false);
+    if (Array.isArray(state.searchResults)) {
+      render();
+    } else {
+      await runSearch(state.searchPage, false);
+    }
+    restoreScrollTop(0);
+    saveHistoryState(true);
   }
 
   function fastSearch(limit) {
@@ -1116,7 +1421,7 @@
 
       const source = state.scope === "current" ? currentRecords() : await loadLocalSearchRecords();
       if (generation !== searchGeneration) return;
-      const filtered = filterRecords(source);
+      const filtered = foldersFirstRecords(filterRecords(source));
       const start = (page - 1) * PAGE_SIZE;
       const list = filtered.slice(start, start + PAGE_SIZE);
       state.searchResults = append ? (state.searchResults || []).concat(list) : list;
@@ -1187,8 +1492,29 @@
     }, 1800);
   }
 
+  function syncDocumentTitle() {
+    try {
+      const leaf = state.stack.length ? state.stack[state.stack.length - 1].name : "";
+      const activeQuery = state.searching
+        ? state.query
+        : state.savedSearch && state.savedSearch.query
+          ? state.savedSearch.query
+          : "";
+      let title = "";
+      if (activeQuery && leaf) title = `搜索"${activeQuery}" - ${leaf}`;
+      else if (activeQuery) title = `搜索"${activeQuery}" - ${SITE_SUBTITLE}`;
+      else if (leaf) title = `${leaf} - ${SITE_SUBTITLE}`;
+      // 与服务端注入的分享卡片标题保持一致的文案，方便用户对照浏览器标签页。
+      document.title = title || baseTitle || document.title;
+    } catch (error) {
+      // 标题同步只是锦上添花，失败不影响主流程。
+    }
+  }
+
   function renderBreadcrumb() {
-    const shouldShow = state.stack.length > 0 || state.searching;
+    const hasSavedSearch = Boolean(state.savedSearch && state.savedSearch.query);
+    const shouldShow = state.stack.length > 0 || state.searching || hasSavedSearch;
+    syncDocumentTitle();
     elements.breadcrumb.classList.toggle("is-hidden", !shouldShow);
     if (!shouldShow) {
       elements.breadcrumb.innerHTML = "";
@@ -1208,7 +1534,12 @@
 
     if (state.searching) {
       parts.push(`<span class="separator">&gt;</span>`);
-      parts.push(`<span class="crumb" title="搜索:${escapeHtml(state.query)}">搜索:${escapeHtml(state.query)}</span>`);
+      parts.push(`<span class="crumb crumb-search" title="搜索关键词：${escapeAttribute(state.query)}">（${escapeHtml(state.query)}）</span>`);
+    } else if (state.savedSearch && state.savedSearch.query) {
+      parts.push(`<span class="separator">&gt;</span>`);
+      parts.push(
+        `<button class="crumb crumb-search" type="button" data-action="back-to-search" title="返回搜索结果：${escapeAttribute(state.savedSearch.query)}">（${escapeHtml(state.savedSearch.query)}）</button>`
+      );
     }
 
     elements.breadcrumb.innerHTML = parts.join("");
@@ -1305,6 +1636,7 @@
       return;
     }
     state.query = query;
+    state.savedSearch = null;
     if (!query) { searchGeneration++; cancelSearch(); state.loading = false; state.loadingMore = false; }
     state.searching = Boolean(query);
     state.searchResults = null;
@@ -1349,6 +1681,11 @@
   });
 
   elements.breadcrumb.addEventListener("click", (event) => {
+    const backToSearch = event.target.closest("[data-action='back-to-search']");
+    if (backToSearch) {
+      returnToSavedSearch();
+      return;
+    }
     const crumb = event.target.closest("[data-crumb]");
     if (!crumb) return;
     jumpTo(Number(crumb.dataset.crumb));
@@ -1371,6 +1708,12 @@
     const record = state.renderedRecords[Number(row.dataset.index)];
     if (!record) return;
     if (isFolderRecord(record)) {
+      if (state.searching && state.query) {
+        // Keep the search page as-is; open the folder in a new tab.
+        window.open(searchFolderTargetUrl(record), "_blank");
+        showToast("已在新页面打开该目录");
+        return;
+      }
       await openFolder(record);
       return;
     }
@@ -1381,8 +1724,39 @@
     restoreFromHistory(event.state);
   });
 
+  // Reopen a folder path (from the ?path= URL parameter) on top of restored
+  // search results. The path now contains the FULL chain; anchor on the first
+  // segment that matches a search-result folder, then walk deeper by name.
+  async function restoreSearchPath(pathParam) {
+    const segments = String(pathParam || "")
+      .split("/")
+      .map((segment) => segment.trim())
+      .filter(Boolean);
+    if (!segments.length || !Array.isArray(state.searchResults)) return;
+    for (let start = 0; start < segments.length; start += 1) {
+      const record = state.searchResults.find(
+        (item) => isFolderRecord(item) && getName(item) === segments[start]
+      );
+      if (!record) continue;
+      await openFolder(record);
+      for (let i = start + 1; i < segments.length; i += 1) {
+        const folder = currentFolder();
+        const entry = folder ? childrenMap[folder.key] : null;
+        const data = entry && Array.isArray(entry.data) ? entry.data : state.renderedRecords;
+        const next = data.find((item) => isFolderRecord(item) && getName(item) === segments[i]);
+        if (!next) return;
+        await openFolder(next);
+      }
+      return;
+    }
+  }
+
   async function initialize() {
-    document.title = data.info && data.info.title ? `${data.info.title} - 网课课程目录搜索` : document.title;
+    baseTitle =
+      data.info && data.info.title ? `${data.info.title} - ${SITE_SUBTITLE}` : document.title || SITE_SUBTITLE;
+    // 带 ?q= / ?path= 时服务端已经写入了对应的分享标题，这里不要用默认标题覆盖；
+    // 稍后由 syncDocumentTitle 根据实际状态统一维护。
+    if (!readInitialQuery()) document.title = baseTitle;
     if (!canUseStaticFiles() && elements.serverBanner) {
       elements.serverBanner.classList.remove("is-hidden");
     }
@@ -1396,6 +1770,10 @@
       elements.input.value = initialSearch.query;
       syncFilterControls();
       await runSearch(initialSearch.page, false);
+      if (initialSearch.path) {
+        await restoreSearchPath(initialSearch.path);
+        return;
+      }
       restoreScrollTop(0);
       saveHistoryState(true);
       return;

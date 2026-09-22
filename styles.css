@@ -267,6 +267,15 @@ button {
   color: #7888fc;
 }
 
+/* Search-context crumb: shown as（关键词）in a distinct color */
+.crumb-search {
+  color: #d48806;
+}
+
+button.crumb-search:hover {
+  color: #ad6800;
+}
+
 .separator {
   color: #555;
 }

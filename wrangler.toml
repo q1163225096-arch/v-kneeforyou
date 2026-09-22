@@ -1,0 +1,16 @@
+# Cloudflare Worker 部署配置（微信分享卡片按内容显示）
+#
+# 部署：在本目录执行
+#   npx wrangler deploy
+# 本地预览：npx wrangler dev
+#
+# 说明：GitHub Pages 是纯静态托管，无法按 ?q= / ?path= 动态生成
+# 微信分享卡片的 <title>/<meta>，所以由这个 Worker 把 GitHub Pages
+# 的页面取回来、注入对应文案后返回。分享链接使用 Worker 的域名。
+
+name = "wx"
+main = "cloudflare-worker/share-worker.mjs"
+compatibility_date = "2025-09-01"
+
+# 允许通过 https://wx.kneeforyou.workers.dev 访问
+workers_dev = true

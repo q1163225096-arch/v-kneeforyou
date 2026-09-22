@@ -1,5 +1,28 @@
 /* Static, on-demand inverted index. No full-catalog download on each search. */
 'use strict';
+// ---- 旧浏览器兼容（微信内置浏览器 / iOS 17.4 以下 / Chrome 116 以下）----
+// 下面 json() 用到 AbortSignal.any / AbortSignal.timeout；缺失时整个快速搜索
+// 会抛错并回退到慢路径。补上等价实现后这些设备也能走快速索引。
+if (typeof AbortSignal !== 'undefined') {
+  if (!AbortSignal.timeout) {
+    AbortSignal.timeout = ms => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new DOMException('signal timed out', 'TimeoutError')), ms);
+      return controller.signal;
+    };
+  }
+  if (!AbortSignal.any) {
+    AbortSignal.any = signals => {
+      const controller = new AbortController();
+      for (const signal of signals) {
+        if (!signal) continue;
+        if (signal.aborted) { controller.abort(signal.reason); break; }
+        signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
+      }
+      return controller.signal;
+    };
+  }
+}
 let latest = 0;
 let base = '';
 let version = '';
@@ -59,6 +82,15 @@ function intersect(a,b) {
 function itemText(item) {
   const raw=item[0]===1 ? `${item[1]||''} ${item[2]||''}` : item[0];
   return normalize(item[5]==='local-self-use' ? raw : String(raw).replace(replacement,'kneeforyou'));
+}
+function isFolderRow(item) {
+  return item[0]===1 ? Boolean(item[6]) : Boolean(item[2]);
+}
+// Stable partition: folders first, files after; relative (relevance) order
+// within each group is preserved.
+function foldersFirst(list) {
+  list.sort((a,b)=>(isFolderRow(b)?1:0)-(isFolderRow(a)?1:0));
+  return list;
 }
 async function search(message, job) {
   const {id,needles,type,limit,all}=message;
@@ -130,7 +162,7 @@ async function search(message, job) {
     if(result.length>limit) break;
     }
   }
-  if(id===latest) postMessage({id,data:result.slice(0,limit),more:result.length>limit});
+  if(id===latest) postMessage({id,data:foldersFirst(result).slice(0,limit),more:result.length>limit});
 }
 self.onmessage=event=>{
   if(activeJob) activeJob.controller.abort(new DOMException('Superseded','AbortError'));

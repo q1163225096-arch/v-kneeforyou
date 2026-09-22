@@ -292,7 +292,25 @@ async function localSearchApi(req, res) {
   }
 }
 
-function serveStatic(req, res) {
+// 分享卡片文案依赖 share-meta.mjs（ESM），这里用动态 import 懒加载一次。
+let shareMetaModulePromise = null;
+function loadShareMetaModule() {
+  if (!shareMetaModulePromise) {
+    shareMetaModulePromise = import("./share-meta.mjs").catch((error) => {
+      console.warn(`share meta disabled: ${error.message}`);
+      return null;
+    });
+  }
+  return shareMetaModulePromise;
+}
+
+function requestOrigin(req, url) {
+  const proto = req.headers["x-forwarded-proto"] || "http";
+  const host = req.headers.host || `127.0.0.1:${port}`;
+  return `${String(proto).split(",")[0].trim()}://${host}`;
+}
+
+async function serveStatic(req, res) {
   const url = new URL(req.url, `http://localhost:${port}`);
   const pathname = decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname);
   const resolved = path.resolve(root, `.${pathname}`);
@@ -301,21 +319,31 @@ function serveStatic(req, res) {
     return;
   }
 
-  fs.readFile(resolved, (error, content) => {
-    if (error) {
-      send(res, 404, { "Content-Type": "text/plain; charset=utf-8" }, "Not found");
-      return;
+  let content;
+  try {
+    content = await fs.promises.readFile(resolved);
+  } catch (error) {
+    send(res, 404, { "Content-Type": "text/plain; charset=utf-8" }, "Not found");
+    return;
+  }
+
+  const contentType = mime[path.extname(resolved).toLowerCase()] || "application/octet-stream";
+
+  // 微信等平台的抓取程序不执行 JS，只能在服务端把 ?q= / ?path= 写进 meta 标签。
+  if (contentType.startsWith("text/html") && url.search) {
+    try {
+      const shareMeta = await loadShareMetaModule();
+      const meta = shareMeta && shareMeta.buildShareMeta(url.search);
+      if (meta) {
+        const absoluteUrl = new URL(req.url, requestOrigin(req, url)).href;
+        content = shareMeta.applyShareMeta(content.toString("utf8"), meta, absoluteUrl);
+      }
+    } catch (error) {
+      console.warn(`share meta injection skipped: ${error.message}`);
     }
-    send(
-      res,
-      200,
-      {
-        "Content-Type": mime[path.extname(resolved).toLowerCase()] || "application/octet-stream",
-        "Cache-Control": "no-store",
-      },
-      content
-    );
-  });
+  }
+
+  send(res, 200, { "Content-Type": contentType, "Cache-Control": "no-store" }, content);
 }
 
 const server = http.createServer((req, res) => {

@@ -1,0 +1,6 @@
+# local tool caches
+.wrangler/
+work/
+node_modules/
+.DS_Store
+Thumbs.db
