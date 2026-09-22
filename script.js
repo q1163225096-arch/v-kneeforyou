@@ -5,7 +5,7 @@
   const childFiles = data.childFiles || {};
   const PAGE_SIZE = 500;
   const DIRECTORY_PAGE_SIZE = 200;
-  const CLIENT_VERSION = "20260922-self-use-2";
+  const CLIENT_VERSION = "20260922-self-use-3";
   const SITE_SUBTITLE = "网课课程目录搜索";
   // 站点默认标题（initialize 里会根据 bootstrap 数据再确认一次）。
   // 与 serveStatic / Netlify Edge Function 注入的分享标题保持一致。
@@ -1607,7 +1607,10 @@
   }
 
   function emptyStateText() {
-    if (!state.searching) return "暂无数据";
+    if (!state.searching) {
+      if (currentFolder()) return "此文件夹为空（目录导出中没有文件）";
+      return "暂无数据";
+    }
     if (state.searchMore) return "前面暂时没找到，点击“加载更多”继续深搜";
     return `没有找到“${state.query}”相关内容`;
   }
