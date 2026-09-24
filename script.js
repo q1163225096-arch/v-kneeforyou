@@ -5,13 +5,13 @@
   const childFiles = data.childFiles || {};
   const PAGE_SIZE = 500;
   const DIRECTORY_PAGE_SIZE = 200;
-  const CLIENT_VERSION = "20260922-self-use-3";
+  const CLIENT_VERSION = "20260924-self-use-1";
   const SITE_SUBTITLE = "网课课程目录搜索";
   // 站点默认标题（initialize 里会根据 bootstrap 数据再确认一次）。
   // 与 serveStatic / Netlify Edge Function 注入的分享标题保持一致。
   let baseTitle = "";
-  const SEARCH_INDEX_VERSION = "20260922-self-use-flat";
-  const PARENT_INDEX_VERSION = "20260922-self-use-flat";
+  const SEARCH_INDEX_VERSION = "20260924-self-use-flat";
+  const PARENT_INDEX_VERSION = "20260924-self-use-flat";
   const PARENT_INDEX_BUCKETS = 32;
   const ASSET_BASE = String(window.YYDOCX_ASSET_BASE || ".").replace(/\/+$/, "");
   const SEARCH_MANIFEST_URL = `${assetUrl("data/search-manifest.json")}?v=${SEARCH_INDEX_VERSION}`;
@@ -87,7 +87,7 @@
   const parentNamesCache = new Map();
   const parentNamesLoading = new Map();
   const HISTORY_KEY = "yydocx-state-v2";
-  const CHILD_INDEX_VERSION = "20260922-self-use-flat";
+  const CHILD_INDEX_VERSION = "20260924-self-use-flat";
   const selfUseBuckets = new Map();
   let searchWorker = null;
   let searchWorkerRequest = 0;
