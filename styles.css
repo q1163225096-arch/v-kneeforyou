@@ -87,27 +87,6 @@ button {
   line-height: 1.5;
 }
 
-.site-footer {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
-  justify-content: space-between;
-  margin-top: 12px;
-  padding: 10px 4px 16px;
-  border-top: 1px solid #e6e8f0;
-  color: #8a93ab;
-  font-size: 12px;
-}
-
-.site-footer a {
-  color: #4a57d6;
-  text-decoration: none;
-}
-
-.site-footer a:hover {
-  text-decoration: underline;
-}
-
 .server-banner {
   margin-bottom: 8px;
   padding: 8px 12px;

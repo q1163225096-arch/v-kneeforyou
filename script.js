@@ -5,7 +5,7 @@
   const childFiles = data.childFiles || {};
   const PAGE_SIZE = 500;
   const DIRECTORY_PAGE_SIZE = 200;
-const CLIENT_VERSION = "20261009-optimize-1";
+const CLIENT_VERSION = "20261009-optimize-2";
   const SITE_SUBTITLE = "网课课程目录搜索";
   // 站点默认标题（initialize 里会根据 bootstrap 数据再确认一次）。
   // 与 serveStatic / Netlify Edge Function 注入的分享标题保持一致。
@@ -1792,30 +1792,11 @@ function getIndexedParentFolderPath(record) {
     }
   }
 
-  // 页脚展示数据来源与目录更新时间，避免访客不知道数据有多旧。
-  function renderSiteMeta() {
-    const sourceLink = document.getElementById("siteSource");
-    if (sourceLink && data.info && data.info.source) {
-      sourceLink.href = data.info.source;
-      sourceLink.textContent = data.info.source;
-    }
-    const updatedAt = document.getElementById("siteUpdatedAt");
-    if (!updatedAt) return;
-    const raw = data.generatedAt || "";
-    const date = raw ? new Date(raw) : null;
-    if (date && !Number.isNaN(date.getTime())) {
-      const pad = (value) => String(value).padStart(2, "0");
-      updatedAt.textContent = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-      updatedAt.setAttribute("datetime", raw);
-    }
-  }
-
   async function initialize() {
     baseTitle =
       data.info && data.info.short
         ? `${SITE_SUBTITLE} - ${data.info.short}`
         : document.title || SITE_SUBTITLE;
-    renderSiteMeta();
     // 带 ?q= / ?path= 时服务端已经写入了对应的分享标题，这里不要用默认标题覆盖；
     // 稍后由 syncDocumentTitle 根据实际状态统一维护。
     if (!readInitialQuery()) document.title = baseTitle;
