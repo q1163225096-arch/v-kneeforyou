@@ -5,7 +5,7 @@
   const childFiles = data.childFiles || {};
   const PAGE_SIZE = 500;
   const DIRECTORY_PAGE_SIZE = 200;
-  const CLIENT_VERSION = "20260924-self-use-1";
+  const CLIENT_VERSION = "20261009-search-hint-1";
   const SITE_SUBTITLE = "网课课程目录搜索";
   // 站点默认标题（initialize 里会根据 bootstrap 数据再确认一次）。
   // 与 serveStatic / Netlify Edge Function 注入的分享标题保持一致。
@@ -1612,6 +1612,10 @@
       return "暂无数据";
     }
     if (state.searchMore) return "前面暂时没找到，点击“加载更多”继续深搜";
+    const needles = searchNeedles(state.query);
+    if (needles.length > 1) {
+      return `没有找到同时包含「${needles.join("」「")}」的内容。多个词是“同时包含”关系，建议分开搜索单个关键词`;
+    }
     return `没有找到“${state.query}”相关内容`;
   }
 
