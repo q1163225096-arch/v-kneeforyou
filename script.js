@@ -5,7 +5,7 @@
   const childFiles = data.childFiles || {};
   const PAGE_SIZE = 500;
   const DIRECTORY_PAGE_SIZE = 200;
-  const CLIENT_VERSION = "20261009-search-hint-1";
+const CLIENT_VERSION = "20261009-search-speed-1";
   const SITE_SUBTITLE = "网课课程目录搜索";
   // 站点默认标题（initialize 里会根据 bootstrap 数据再确认一次）。
   // 与 serveStatic / Netlify Edge Function 注入的分享标题保持一致。
@@ -273,10 +273,9 @@
     parentIndexLoading.set(cacheKey, loading);
   }
 
-  function getIndexedParentFolderPath(record) {
-    if (record.pathId === "local-self-use" && record.associationFilePath) return "";
-    if (!state.searching || isFolderRecord(record) || looksLikeDirectory(record)) return "";
-    const parts = parentLookupParts(record);
+function getIndexedParentFolderPath(record) {
+  if (!state.searching || isFolderRecord(record) || looksLikeDirectory(record)) return "";
+  const parts = parentLookupParts(record);
     if (!parts) return "";
     const bucket = parentIndexBucket(parts.fileId);
     const cacheKey = `${parts.pathId}:${bucket}`;
@@ -287,8 +286,9 @@
     }
     if (!parentNamesCache.has(parts.pathId)) startParentNamesLoad(parts.pathId);
     if (!parentIndexCache.has(cacheKey)) startParentIndexLoad(parts.pathId, bucket);
-    return "";
-  }
+  const recordFolderPath = getRecordFolderPath(record, "");
+  return normalizeDisplayPath(recordFolderPath) === "/" ? "" : recordFolderPath;
+}
 
   function formatDisplayPath(value) {
     const path = normalizeDisplayPath(value);
@@ -1386,6 +1386,19 @@
     });
   }
 
+  function warmSearchAssets() {
+    if (!canUseStaticFiles()) return;
+    const warm = () => {
+      fetch(`${assetUrl("data/fast-search/manifest.json")}?v=${SEARCH_INDEX_VERSION}`, { cache: "force-cache" }).catch(() => {});
+      fetch(`${assetUrl("data/fast-search/directories.bin")}?v=${SEARCH_INDEX_VERSION}`, { cache: "force-cache" }).catch(() => {});
+    };
+    if ("requestIdleCallback" in window) {
+      window.requestIdleCallback(warm, { timeout: 2500 });
+    } else {
+      window.setTimeout(warm, 800);
+    }
+  }
+
   async function runSearch(page, append) {
     const generation = ++searchGeneration;
     cancelSearch();
@@ -1406,7 +1419,15 @@
         const limit = page * PAGE_SIZE;
         const previousCount = append && Array.isArray(state.searchResults) ? state.searchResults.length : 0;
         let result;
-        try { result = await fastSearch(limit); }
+        try {
+          result = await fastSearch(limit);
+          // Fast search returning no rows can be caused by an interrupted or
+          // stale browser cache. Confirm with the complete static index before
+          // telling the visitor that no matching content exists.
+          if (!result.data.length) {
+            result = await searchStaticChunks(limit, append ? previousCount + 1 : 1, legacyController.signal);
+          }
+        }
         catch (error) {
           if (generation !== searchGeneration || error.name === "AbortError") return;
           if (error.name === "TimeoutError") throw error;
@@ -1431,7 +1452,7 @@
       if (generation !== searchGeneration || error.name === "AbortError") return;
       state.searchResults = null;
       state.searchMore = false;
-      showToast(error.name === "TimeoutError" ? "搜索超时，请重试或使用更具体的关键词" : "搜索加载失败，请检查网络后重试");
+      showToast(error.name === "TimeoutError" ? "搜索时间较长，请换更具体的关键词后重试" : "搜索暂时无法完成，请刷新页面后重新搜索");
     } finally {
       clearTimeout(deadline);
       if (generation === searchGeneration) {
@@ -1767,6 +1788,7 @@
     if (!canUseStaticFiles() && elements.serverBanner) {
       elements.serverBanner.classList.remove("is-hidden");
     }
+    warmSearchAssets();
 
     const initialSearch = readInitialSearchState();
     if (initialSearch.query && normalize(initialSearch.query).length >= 2) {
