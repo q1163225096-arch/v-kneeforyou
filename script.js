@@ -5,7 +5,7 @@
   const childFiles = data.childFiles || {};
   const PAGE_SIZE = 500;
   const DIRECTORY_PAGE_SIZE = 200;
-const CLIENT_VERSION = "20261009-search-speed-1";
+const CLIENT_VERSION = "20261009-optimize-1";
   const SITE_SUBTITLE = "网课课程目录搜索";
   // 站点默认标题（initialize 里会根据 bootstrap 数据再确认一次）。
   // 与 serveStatic / Netlify Edge Function 注入的分享标题保持一致。
@@ -17,8 +17,10 @@ const CLIENT_VERSION = "20261009-search-speed-1";
   const SEARCH_MANIFEST_URL = `${assetUrl("data/search-manifest.json")}?v=${SEARCH_INDEX_VERSION}`;
   const SEARCH_CHUNKS_PER_PAGE = 10;
   const SEARCH_INITIAL_TIME_BUDGET_MS = 8000;
-  const DIRTS_DIRECT_URL = "https://path.dirts.cn/suda/server/front/business/path/file/list";
-  const DIRTS_DIRECT_AUTH = "65516aa4f5cc9c2681bf791c4593020c679ca8a6165030a6c26429ebac1dc2f4";
+  // 第三方目录接口的凭据不再写在前端（查看源码即可被任何人拿走）。
+  // 线上统一走 Cloudflare Worker 的边缘代理，由 Worker 在服务端带上 Authorization。
+  const DIRTS_PROXY_PATH = "./api/dirts/list";
+  const DIRTS_EDGE_PROXY_URL = "https://wx.kneeforyou.workers.dev/v-kneeforyou/api/dirts/list";
   const fileLikeExtensionPattern =
     /\.(?:mp4|m4v|mov|avi|mkv|wmv|flv|webm|mp3|m4a|wav|flac|aac|ogg|zip|rar|7z|tar|gz|pdf|doc|docx|xls|xlsx|xlsm|ppt|pptx|txt|md|csv|json|html|htm|jpg|jpeg|png|gif|webp|svg|psd|ai|prproj|aep|exe|apk|dmg|iso|cube|mb|ds_store|ttc|otf|rbz|mmap|tsdownloading|dbf|prj|sbn|sbx|shp|shx|jar|hdr|cpg|fbx|jmx|pst|drawio|rpm|octet-stream|wedrive)(?:$|[?#\s）)】\]》」』”'",，,。；;：:、])/i;
 
@@ -620,6 +622,21 @@ function getIndexedParentFolderPath(record) {
     return record && record.provider === "dirts" && window.location.protocol !== "file:";
   }
 
+  // dirts 目录请求走哪儿：本地/Netlify/Worker 域名都有同域服务端代理，
+  // GitHub Pages 是纯静态，只能跨域调用 Worker 的边缘代理（Worker 已配置 CORS）。
+  function dirtsListUrl() {
+    if (window.location.protocol === "file:") return DIRTS_PROXY_PATH;
+    const hostname = window.location.hostname;
+    if (
+      canUseRemoteApi() ||
+      hostname.endsWith(".workers.dev") ||
+      hostname.endsWith(".pages.dev")
+    ) {
+      return DIRTS_PROXY_PATH;
+    }
+    return DIRTS_EDGE_PROXY_URL;
+  }
+
   function expandCompactEntry(parent, entry) {
     if (!entry || entry.format !== "yyc1" || !Array.isArray(entry.data)) return entry;
     const parentPathId = parent && parent.pathId;
@@ -925,14 +942,10 @@ function getIndexedParentFolderPath(record) {
   }
 
   function visibleRecords() {
-    if (state.searching && Array.isArray(state.searchResults)) {
-      return state.searchResults;
-    }
-
-    const source = state.searching && Array.isArray(state.searchResults)
-      ? state.searchResults
-      : state.searching
-      ? state.scope === "current"
+    const source = state.searching
+      ? Array.isArray(state.searchResults)
+        ? state.searchResults
+        : state.scope === "current"
         ? currentRecords()
         : allIndexedRecords()
       : currentRecords();
@@ -1031,7 +1044,7 @@ function getIndexedParentFolderPath(record) {
       state.loading = true;
       render();
       try {
-        const json = await postJson(DIRTS_DIRECT_URL, dirtsDirectRequest(record), { Authorization: DIRTS_DIRECT_AUTH });
+        const json = await postJson(dirtsListUrl(), dirtsDirectRequest(record));
         const entry = {
           data: normalizeLoadedRecords(record, Array.isArray(json.data) ? json.data : Array.isArray(json.result) ? json.result : []),
           more: false,
@@ -1389,8 +1402,9 @@ function getIndexedParentFolderPath(record) {
   function warmSearchAssets() {
     if (!canUseStaticFiles()) return;
     const warm = () => {
+      // 只预热 manifest（几十 KB）。directories.bin 约 480KB，改成真正搜索时按需加载，
+      // 避免首次访问白白吃掉几百 KB 流量。
       fetch(`${assetUrl("data/fast-search/manifest.json")}?v=${SEARCH_INDEX_VERSION}`, { cache: "force-cache" }).catch(() => {});
-      fetch(`${assetUrl("data/fast-search/directories.bin")}?v=${SEARCH_INDEX_VERSION}`, { cache: "force-cache" }).catch(() => {});
     };
     if ("requestIdleCallback" in window) {
       window.requestIdleCallback(warm, { timeout: 2500 });
@@ -1485,9 +1499,8 @@ function getIndexedParentFolderPath(record) {
       const nextPage = (entry.page || 1) + 1;
       const useDirtsDirect = !canUseRemoteApi() && canUseDirtsDirect(folder.record);
       const json = await postJson(
-        useDirtsDirect ? DIRTS_DIRECT_URL : folder.record.provider === "dirts" ? "./api/dirts/list" : "./api/list",
-        useDirtsDirect ? dirtsDirectRequest(folder.record) : folderRequest(folder.record, nextPage, pageSize),
-        useDirtsDirect ? { Authorization: DIRTS_DIRECT_AUTH } : {}
+        useDirtsDirect ? dirtsListUrl() : folder.record.provider === "dirts" ? "./api/dirts/list" : "./api/list",
+        useDirtsDirect ? dirtsDirectRequest(folder.record) : folderRequest(folder.record, nextPage, pageSize)
       );
       const rows = normalizeLoadedRecords(folder.record, Array.isArray(json.data) ? json.data : Array.isArray(json.result) ? json.result : []);
       entry.data = entry.data.concat(rows);
@@ -1779,9 +1792,30 @@ function getIndexedParentFolderPath(record) {
     }
   }
 
+  // 页脚展示数据来源与目录更新时间，避免访客不知道数据有多旧。
+  function renderSiteMeta() {
+    const sourceLink = document.getElementById("siteSource");
+    if (sourceLink && data.info && data.info.source) {
+      sourceLink.href = data.info.source;
+      sourceLink.textContent = data.info.source;
+    }
+    const updatedAt = document.getElementById("siteUpdatedAt");
+    if (!updatedAt) return;
+    const raw = data.generatedAt || "";
+    const date = raw ? new Date(raw) : null;
+    if (date && !Number.isNaN(date.getTime())) {
+      const pad = (value) => String(value).padStart(2, "0");
+      updatedAt.textContent = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+      updatedAt.setAttribute("datetime", raw);
+    }
+  }
+
   async function initialize() {
     baseTitle =
-      data.info && data.info.title ? `${data.info.title} - ${SITE_SUBTITLE}` : document.title || SITE_SUBTITLE;
+      data.info && data.info.short
+        ? `${SITE_SUBTITLE} - ${data.info.short}`
+        : document.title || SITE_SUBTITLE;
+    renderSiteMeta();
     // 带 ?q= / ?path= 时服务端已经写入了对应的分享标题，这里不要用默认标题覆盖；
     // 稍后由 syncDocumentTitle 根据实际状态统一维护。
     if (!readInitialQuery()) document.title = baseTitle;

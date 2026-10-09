@@ -195,6 +195,67 @@ const COVER_BASE64 =
   "jjIRBEGRkCBIhARBkAgJgkRIEASJkCBIhARBkAgJgkRIEASJkCBIhARBkAgJAnSolyAIioQEQacoCIKgSEgQJEKCIEiEBEEiJAiC" +
   "REgQJEKCIJrG/we7o6plqdPc4wAAAABJRU5ErkJggg==";
 
+// ===== dirts 目录接口的边缘代理 =====
+// 「50」分区下的会员分区 / Z系列课程 / 资源分区等是动态目录，需要带凭据实时查询。
+// 以前这个凭据直接写在网页 JS 里，任何人打开 F12 就能抄走。
+// 现在改成只放在 Worker：前端 POST /api/dirts/list，由 Worker 在服务端加上 Authorization 转发。
+// 注意：改完本文件要在 Cloudflare 控制台重新 Deploy，前端才会生效。
+const DIRTS_UPSTREAM = "https://path.dirts.cn/suda/server/front/business/path/file/list";
+const DIRTS_AUTH = "65516aa4f5cc9c2681bf791c4593020c679ca8a6165030a6c26429ebac1dc2f4";
+// 允许跨域调用代理的来源（GitHub Pages 直连时必须，Worker 域名下同源不需要）。
+const CORS_ORIGIN_PATTERNS = [
+  /^https:\/\/q1163225096-arch\.github\.io$/,
+  /^https:\/\/[a-z0-9-]+\.workers\.dev$/,
+];
+
+function corsHeaders(request) {
+  const origin = request.headers.get("origin") || "";
+  const allowed = CORS_ORIGIN_PATTERNS.some((pattern) => pattern.test(origin));
+  return {
+    "access-control-allow-origin": allowed ? origin : "*",
+    "access-control-allow-methods": "POST, OPTIONS",
+    "access-control-allow-headers": "content-type",
+    "access-control-max-age": "86400",
+    vary: "origin",
+  };
+}
+
+async function handleDirtsProxy(request) {
+  const cors = corsHeaders(request);
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: cors });
+  }
+  if (request.method !== "POST") {
+    return new Response("Method Not Allowed", { status: 405, headers: cors });
+  }
+  let body = "";
+  try {
+    body = await request.text();
+  } catch (error) {
+    body = "";
+  }
+  try {
+    const upstream = await fetch(DIRTS_UPSTREAM, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: DIRTS_AUTH },
+      body,
+    });
+    return new Response(upstream.body, {
+      status: upstream.status,
+      headers: {
+        ...cors,
+        "content-type": upstream.headers.get("content-type") || "application/json",
+        "cache-control": "no-store",
+      },
+    });
+  } catch (error) {
+    return new Response(JSON.stringify({ errorCode: 1, msg: `目录服务请求失败：${error.message}` }), {
+      status: 502,
+      headers: { ...cors, "content-type": "application/json; charset=utf-8" },
+    });
+  }
+}
+
 // ===== 文案配置，与 share-meta.mjs 保持一致 =====
 const SITE_NAME = "已购免费未购看链接";
 const SITE_SUBTITLE = "网课课程目录搜索";
@@ -337,11 +398,17 @@ const htmlCache = new Map();
 export default {
   async fetch(request) {
     const method = request.method.toUpperCase();
+    const url = new URL(request.url);
+
+    // dirts 动态目录代理：前端不再持有任何凭据。
+    if (url.pathname.replace(/\/+$/, "").endsWith("/api/dirts/list")) {
+      return handleDirtsProxy(request);
+    }
+
     if (method !== "GET" && method !== "HEAD") {
       return new Response("Method Not Allowed", { status: 405 });
     }
 
-    const url = new URL(request.url);
     // 缩略图直接由 Worker 提供，避免上游未上传时 og:image 404。
     if (url.pathname === "/share-cover.png" || url.pathname.endsWith("/share-cover.png")) {
       return new Response(Uint8Array.from(atob(COVER_BASE64), (c) => c.charCodeAt(0)), {
@@ -385,6 +452,11 @@ export default {
     if (!contentType.includes("text/html") || upstream.status !== 200) {
       const headers = new Headers(upstream.headers);
       headers.delete("content-encoding");
+      // 带 ?v=<版本号> 的 js/css/数据分片内容不会变，让浏览器和 CDN 长期缓存，
+      // 版本号一变就是新 URL，不会读到旧文件。
+      if (upstream.status === 200 && url.searchParams.has("v")) {
+        headers.set("cache-control", "public, max-age=31536000, immutable");
+      }
       return new Response(upstream.body, { status: upstream.status, headers });
     }
 
