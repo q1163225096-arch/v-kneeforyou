@@ -5,7 +5,7 @@
   const childFiles = data.childFiles || {};
   const PAGE_SIZE = 500;
   const DIRECTORY_PAGE_SIZE = 200;
-const CLIENT_VERSION = "20261011-self-use-4";
+const CLIENT_VERSION = "20261011-self-use-5";
   const SITE_SUBTITLE = "网课课程目录搜索";
   // 站点默认标题（initialize 里会根据 bootstrap 数据再确认一次）。
   // 与 serveStatic / Netlify Edge Function 注入的分享标题保持一致。
@@ -1282,9 +1282,15 @@ function getIndexedParentFolderPath(record) {
       state.searchResults = null;
       state.query = "";
       elements.input.value = "";
-      const chain = await buildAncestorChain(record);
+      // 父链只是用来还原面包屑，取不到不该影响打开目录本身。
+      let chain = [];
+      try {
+        chain = (await buildAncestorChain(record)) || [];
+      } catch (error) {
+        chain = [];
+      }
       if (generation !== searchGeneration) return;
-      state.stack.push(...chain);
+      if (chain.length) state.stack.push(...chain);
     }
     const entry = await ensureChildren(record);
     if (generation !== searchGeneration) return;
@@ -1807,10 +1813,12 @@ function getIndexedParentFolderPath(record) {
     const record = state.renderedRecords[Number(row.dataset.index)];
     if (!record) return;
     if (isFolderRecord(record)) {
-      if (state.searching && state.query) {
-        // Keep the search page as-is; open the folder in a new tab.
+      // 搜索结果里的目录默认在当前页打开：openFolder 会把当前搜索存进
+      // savedSearch，面包屑上有"返回搜索结果"。之前用 window.open 新开标签，
+      // 在微信内置浏览器和开了弹窗拦截的浏览器里会被静默拦掉，表现为"点了没反应"。
+      // 按住 Ctrl/⌘ 点击仍然在新标签页打开。
+      if (state.searching && state.query && (event.metaKey || event.ctrlKey)) {
         window.open(searchFolderTargetUrl(record), "_blank");
-        showToast("已在新页面打开该目录");
         return;
       }
       await openFolder(record);
