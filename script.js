@@ -5,7 +5,11 @@
   const childFiles = data.childFiles || {};
   const PAGE_SIZE = 500;
   const DIRECTORY_PAGE_SIZE = 200;
-const CLIENT_VERSION = "20261013-self-use-7";
+  // 搜索首屏的条数。原来直接用 PAGE_SIZE=500，意味着每次搜索都要把全部候选
+  // 扫完（例如「幼教」要拉 156 个分片 / 4.2MB）才肯返回，弱网下必然超时。
+  // 首屏只取 80 条，剩下的走"加载更多"，分片已有缓存，后续反而更快。
+  const SEARCH_FIRST_PAGE = 80;
+const CLIENT_VERSION = "20261013-self-use-8";
   const SITE_SUBTITLE = "网课课程目录搜索";
   // 站点默认标题（initialize 里会根据 bootstrap 数据再确认一次）。
   // 与 serveStatic / Netlify Edge Function 注入的分享标题保持一致。
@@ -1482,7 +1486,7 @@ function getIndexedParentFolderPath(record) {
     render();
     try {
       if (canUseStaticFiles() && state.scope === "global") {
-        const limit = page * PAGE_SIZE;
+        const limit = SEARCH_FIRST_PAGE * page;
         const previousCount = append && Array.isArray(state.searchResults) ? state.searchResults.length : 0;
         let result;
         try {
