@@ -5,7 +5,7 @@
   const childFiles = data.childFiles || {};
   const PAGE_SIZE = 500;
   const DIRECTORY_PAGE_SIZE = 200;
-const CLIENT_VERSION = "20261011-self-use-2";
+const CLIENT_VERSION = "20261011-self-use-3";
   const SITE_SUBTITLE = "网课课程目录搜索";
   // 站点默认标题（initialize 里会根据 bootstrap 数据再确认一次）。
   // 与 serveStatic / Netlify Edge Function 注入的分享标题保持一致。
@@ -92,6 +92,7 @@ const CLIENT_VERSION = "20261011-self-use-2";
   const CHILD_INDEX_VERSION = "20261011b-self-use-flat";
   const selfUseBuckets = new Map();
   let searchWorker = null;
+  let fastSearchPartialHandler = null;
   let searchWorkerRequest = 0;
   let pendingFastSearch = null;
   let searchGeneration = 0;
@@ -1364,17 +1365,29 @@ function getIndexedParentFolderPath(record) {
     saveHistoryState(true);
   }
 
-  function fastSearch(limit) {
+  function fastSearch(limit, onPartial) {
+    fastSearchPartialHandler = typeof onPartial === "function" ? onPartial : null;
     if (!searchWorker) {
       searchWorker = new Worker(`./search-worker.js?v=${CLIENT_VERSION}`);
       searchWorker.onmessage = event => {
         const result = event.data;
         if (!pendingFastSearch || pendingFastSearch.id !== result.id) return;
         const pending = pendingFastSearch;
+        if (result.error) {
+          clearTimeout(pending.timer);
+          pendingFastSearch = null;
+          const error = new Error(result.error); error.name = result.errorName || "Error"; pending.reject(error);
+          return;
+        }
+        const payload = { data: result.data.map(expandSearchItem), more: result.more, timedOut: Boolean(result.timedOut) };
+        // 渐进结果：先渲染，等最终结果到达再 resolve。
+        if (result.partial && !result.timedOut) {
+          if (fastSearchPartialHandler) { try { fastSearchPartialHandler(payload); } catch (e) { /* ignore */ } }
+          return;
+        }
         clearTimeout(pending.timer);
         pendingFastSearch = null;
-        if (result.error) { const error = new Error(result.error); error.name = result.errorName || "Error"; pending.reject(error); }
-        else pending.resolve({ data: result.data.map(expandSearchItem), more: result.more });
+        pending.resolve(payload);
       };
       searchWorker.onerror = () => {
         if (pendingFastSearch) { clearTimeout(pendingFastSearch.timer); pendingFastSearch.reject(new Error("Search worker failed")); }
@@ -1434,7 +1447,16 @@ function getIndexedParentFolderPath(record) {
         const previousCount = append && Array.isArray(state.searchResults) ? state.searchResults.length : 0;
         let result;
         try {
-          result = await fastSearch(limit);
+          result = await fastSearch(limit, partial => {
+            if (generation !== searchGeneration) return;
+            state.searchResults = partial.data;
+            state.searchMore = partial.more;
+            state.searchPage = page;
+            state.loading = false;
+            state.loadingMore = false;
+            render();
+          });
+          if (result.timedOut) showToast("内容较多，已先显示已找到的部分结果");
           // Fast search returning no rows can be caused by an interrupted or
           // stale browser cache. Confirm with the complete static index before
           // telling the visitor that no matching content exists.

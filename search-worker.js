@@ -31,9 +31,15 @@ let directoryBits;
 let replacement;
 let activeJob;
 const CONCURRENCY = 6;
+// 行块（r*.json）体积小、数量多，稀疏关键词一次搜索往往要拉上百个，
+// 并发放宽到 16 能显著缩短总耗时。
+const ROW_CONCURRENCY = 16;
 const REQUEST_TIMEOUT = 12000;
 const SEARCH_TIMEOUT = 45000;
+// 每 1.2 秒把已找到的结果先抛给页面，避免用户长时间看到空白。
+const PARTIAL_INTERVAL_MS = 1200;
 const cache = new Map();
+const CACHE_LIMIT = 320;
 const normalize = value => String(value || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 function hash(value) { let n=2166136261; for(let i=0;i<value.length;i++) n=Math.imul(n^value.charCodeAt(i),16777619); return n>>>0; }
 async function json(file, job) {
@@ -55,7 +61,7 @@ async function json(file, job) {
     const value = await request;
     job.controller.signal.throwIfAborted();
     cache.set(file,value);
-    if(cache.size>80) cache.delete(cache.keys().next().value);
+    if(cache.size>CACHE_LIMIT) cache.delete(cache.keys().next().value);
     return value;
   } finally { job.inflight.delete(file); }
 }
@@ -127,7 +133,7 @@ async function search(message, job) {
     candidates=decode(entries[0]);
     for(let i=1;i<entries.length&&candidates.length;i++) candidates=intersect(candidates,decode(entries[i]));
   }
-  const result=[];
+  const result=job.result;
   const seen=new Set();
   const length=candidates===null?metadata.total:candidates.length;
   let cursor=0;
@@ -144,7 +150,7 @@ async function search(message, job) {
     const chunk=Math.floor(docId/metadata.rowSize);
     let group=groups[groups.length-1];
     if(!group || group.chunk!==chunk) {
-      if(groups.length===CONCURRENCY) break;
+      if(groups.length===ROW_CONCURRENCY) break;
       group={chunk,ids:[]};groups.push(group);
     }
     group.ids.push(docId);cursor++;
@@ -161,18 +167,32 @@ async function search(message, job) {
     result.push(item);
     if(result.length>limit) break;
     }
+    if(id===latest && result.length && Date.now()>=job.nextEmit) {
+      job.nextEmit=Date.now()+PARTIAL_INTERVAL_MS;
+      postMessage({id,data:foldersFirst(result.slice()).slice(0,limit),more:true,partial:true});
+    }
   }
-  if(id===latest) postMessage({id,data:foldersFirst(result).slice(0,limit),more:result.length>limit});
+  return result;
 }
 self.onmessage=event=>{
   if(activeJob) activeJob.controller.abort(new DOMException('Superseded','AbortError'));
   latest=event.data.id;
   if(event.data.cancel) return;
-  const job={controller:new AbortController(),inflight:new Map()};
+  const job={controller:new AbortController(),inflight:new Map(),result:[],nextEmit:Date.now()+PARTIAL_INTERVAL_MS,timedOut:false};
   activeJob=job;
-  const timer=setTimeout(()=>job.controller.abort(new DOMException('Search timed out','TimeoutError')),SEARCH_TIMEOUT);
-  search(event.data,job).catch(error=>{
+  const limit=event.data.limit;
+  const timer=setTimeout(()=>{job.timedOut=true;job.controller.abort(new DOMException('Search timed out','TimeoutError'));},SEARCH_TIMEOUT);
+  search(event.data,job).then(result=>{
+    if(event.data.id!==latest) return;
+    postMessage({id:event.data.id,data:foldersFirst(result).slice(0,limit),more:result.length>limit});
+  }).catch(error=>{
     job.controller.abort(error);
-    if(event.data.id===latest) postMessage({id:event.data.id,error:error.message,errorName:error.name});
+    if(event.data.id!==latest) return;
+    // 超时/请求中断时，把已经找到的结果先交给页面，而不是报一个"没结果"。
+    if(job.timedOut && job.result.length) {
+      postMessage({id:event.data.id,data:foldersFirst(job.result.slice()).slice(0,limit),more:true,partial:true,timedOut:true});
+      return;
+    }
+    postMessage({id:event.data.id,error:error.message,errorName:error.name});
   }).finally(()=>{clearTimeout(timer);if(activeJob===job)activeJob=null;});
 };
