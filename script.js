@@ -5,13 +5,13 @@
   const childFiles = data.childFiles || {};
   const PAGE_SIZE = 500;
   const DIRECTORY_PAGE_SIZE = 200;
-const CLIENT_VERSION = "20261011-self-use-5";
+const CLIENT_VERSION = "20261013-self-use-6";
   const SITE_SUBTITLE = "网课课程目录搜索";
   // 站点默认标题（initialize 里会根据 bootstrap 数据再确认一次）。
   // 与 serveStatic / Netlify Edge Function 注入的分享标题保持一致。
   let baseTitle = "";
-  const SEARCH_INDEX_VERSION = "20261011b-self-use-flat";
-  const PARENT_INDEX_VERSION = "20261011b-self-use-flat";
+  const SEARCH_INDEX_VERSION = "20261013-self-use-1";
+  const PARENT_INDEX_VERSION = "20261013-self-use-1";
   const PARENT_INDEX_BUCKETS = 32;
   const ASSET_BASE = String(window.YYDOCX_ASSET_BASE || ".").replace(/\/+$/, "");
   const SEARCH_MANIFEST_URL = `${assetUrl("data/search-manifest.json")}?v=${SEARCH_INDEX_VERSION}`;
@@ -89,7 +89,7 @@ const CLIENT_VERSION = "20261011-self-use-5";
   const parentNamesCache = new Map();
   const parentNamesLoading = new Map();
   const HISTORY_KEY = "yydocx-state-v2";
-  const CHILD_INDEX_VERSION = "20261011b-self-use-flat";
+  const CHILD_INDEX_VERSION = "20261013-self-use-1";
   const selfUseBuckets = new Map();
   let searchWorker = null;
   let fastSearchPartialHandler = null;
@@ -1009,6 +1009,7 @@ function getIndexedParentFolderPath(record) {
     if (canUseStaticFiles()) {
       state.loading = true;
       render();
+      let staticFailed = false;
       try {
         const childFile = childFiles[key] || (await indexedChildFile(key));
         if (childFile) {
@@ -1035,9 +1036,15 @@ function getIndexedParentFolderPath(record) {
           return entry;
         }
       } catch (error) {
-        showToast("本地目录缓存加载失败，正在尝试在线加载");
+        staticFailed = true;
       } finally {
         state.loading = false;
+      }
+      // 索引加载失败（网络抖动、缓存过期）绝不能当成"这个目录是空的"缓存下来，
+      // 否则一次失败就会让该目录在本次会话里永远打不开。
+      if (staticFailed) {
+        showToast("目录索引加载失败，请重试");
+        return null;
       }
     }
 
@@ -1269,15 +1276,21 @@ function getIndexedParentFolderPath(record) {
     cancelSearch();
     state.directoryPage = 1;
     saveHistoryState(true);
-    if (state.searching && state.query) {
-      state.savedSearch = {
-        query: state.query,
-        type: state.type,
-        scope: state.scope,
-        searchResults: state.searchResults,
-        searchMore: state.searchMore,
-        searchPage: state.searchPage,
-      };
+    // 打开失败时要能原样退回去，所以先把当前状态留个底。
+    const stackBefore = state.stack.length;
+    const savedSearchBefore = state.savedSearch;
+    const searchSnapshot = state.searching && state.query
+      ? {
+          query: state.query,
+          type: state.type,
+          scope: state.scope,
+          searchResults: state.searchResults,
+          searchMore: state.searchMore,
+          searchPage: state.searchPage,
+        }
+      : null;
+    if (searchSnapshot) {
+      state.savedSearch = searchSnapshot;
       state.searching = false;
       state.searchResults = null;
       state.query = "";
@@ -1295,6 +1308,18 @@ function getIndexedParentFolderPath(record) {
     const entry = await ensureChildren(record);
     if (generation !== searchGeneration) return;
     if (!entry) {
+      // 目录数据没拿到：退回打开之前的状态，不让用户停在"空目录"上。
+      state.stack = state.stack.slice(0, stackBefore);
+      state.loading = false;
+      if (searchSnapshot) {
+        state.savedSearch = savedSearchBefore;
+        state.searching = true;
+        state.query = searchSnapshot.query;
+        state.searchResults = searchSnapshot.searchResults;
+        state.searchMore = searchSnapshot.searchMore;
+        state.searchPage = searchSnapshot.searchPage;
+        elements.input.value = searchSnapshot.query;
+      }
       render();
       return;
     }
