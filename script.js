@@ -5,7 +5,7 @@
   const childFiles = data.childFiles || {};
   const PAGE_SIZE = 500;
   const DIRECTORY_PAGE_SIZE = 200;
-const CLIENT_VERSION = "20261013-self-use-6";
+const CLIENT_VERSION = "20261013-self-use-7";
   const SITE_SUBTITLE = "网课课程目录搜索";
   // 站点默认标题（initialize 里会根据 bootstrap 数据再确认一次）。
   // 与 serveStatic / Netlify Edge Function 注入的分享标题保持一致。
@@ -1397,6 +1397,14 @@ function getIndexedParentFolderPath(record) {
   }
 
   function fastSearch(limit, onPartial) {
+    // iOS 16.4 以下的 Safari、过旧的微信内置内核没有 DecompressionStream，
+    // 快速索引的分片解不开（虽然 search-worker.js 里补了 AbortSignal 但补不了解压）。
+    // 这种情况下直接走完整索引，别让用户白等一轮 20 秒再看到"没有找到"。
+    if (typeof DecompressionStream === "undefined") {
+      const error = new Error("DecompressionStream unavailable");
+      error.name = "NotSupportedError";
+      return Promise.reject(error);
+    }
     fastSearchPartialHandler = typeof onPartial === "function" ? onPartial : null;
     if (!searchWorker) {
       searchWorker = new Worker(`./search-worker.js?v=${CLIENT_VERSION}`);
@@ -1518,9 +1526,19 @@ function getIndexedParentFolderPath(record) {
       state.searchPage = page;
     } catch (error) {
       if (generation !== searchGeneration || error.name === "AbortError") return;
-      state.searchResults = null;
-      state.searchMore = false;
-      showToast(error.name === "TimeoutError" ? "搜索时间较长，请换更具体的关键词后重试" : "搜索暂时无法完成，请刷新页面后重新搜索");
+      // 已经渐进显示出来的结果不要丢掉，否则用户会以为"没找到"。
+      const hadResults = Array.isArray(state.searchResults) && state.searchResults.length > 0;
+      if (!hadResults) {
+        state.searchResults = null;
+        state.searchMore = false;
+      }
+      showToast(
+        hadResults
+          ? "搜索时间较长，已先显示找到的部分结果"
+          : error.name === "TimeoutError"
+            ? "搜索时间较长，请换更具体的关键词后重试"
+            : "搜索暂时无法完成，请刷新页面后重新搜索"
+      );
     } finally {
       clearTimeout(deadline);
       if (generation === searchGeneration) {
