@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>搜索诊断</title>
+    <style>
+      body { font-family: system-ui, -apple-system, sans-serif; padding: 14px; line-height: 1.7; }
+      h2 { font-size: 18px; margin: 0 0 10px; }
+      pre { background: #f5f6f7; padding: 12px; border-radius: 8px; white-space: pre-wrap; word-break: break-all; font-size: 13px; }
+      .hint { color: #666; font-size: 13px; margin-bottom: 12px; }
+      button { padding: 8px 16px; font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <h2>搜索诊断（跑完截图发给我）</h2>
+    <div class="hint">完成后把整段结果截图给我，我就能定位你在 4G 下到底是卡在哪一步。</div>
+    <button id="copy">复制结果</button>
+    <pre id="out">正在测…</pre>
+    <script>
+      const BASE = new URL("./data/fast-search", location.href).href;
+      const V = "20261013-self-use-1";
+      const CLIENT_V = "20261013-self-use-8";
+      const log = [];
+      const out = document.getElementById("out");
+      const t0 = performance.now();
+      function p(s) {
+        log.push(s);
+        out.textContent = log.join("\n");
+      }
+      function el() { return ((performance.now() - t0) / 1000).toFixed(2) + "s"; }
+      async function timed(name, fn) {
+        const s = performance.now();
+        try {
+          const r = await fn();
+          p(`[${el()}] ${name}: 成功 ${((performance.now() - s) / 1000).toFixed(2)}s${r === undefined ? "" : " · " + r}`);
+          return r;
+        } catch (e) {
+          p(`[${el()}] ${name}: 失败 ${((performance.now() - s) / 1000).toFixed(2)}s · ${e.name}: ${e.message}`);
+          return null;
+        }
+      }
+
+      (async () => {
+        p("UA: " + navigator.userAgent);
+        p("DecompressionStream: " + typeof DecompressionStream);
+        p("Worker: " + typeof Worker + " · caches: " + typeof caches);
+        p("AbortSignal.timeout: " + (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout));
+        p("连接: " + (navigator.connection ? `${navigator.connection.effectiveType || "?"} downlink=${navigator.connection.downlink || "?"}Mbps rtt=${navigator.connection.rtt || "?"}ms` : "未知"));
+        p("--- 单请求耗时 ---");
+
+        let m = null;
+        await timed("manifest.json", async () => {
+          const r = await fetch(`${BASE}/manifest.json?v=${V}`);
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          m = await r.json();
+          return `total=${m.total} rowSize=${m.rowSize}`;
+        });
+        await timed("1 个 r 分片(约23KB,需解压)", async () => {
+          const r = await fetch(`${BASE}/r00000.json.gz?v=${V}`);
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          const s = new Response(r.body.pipeThrough(new DecompressionStream("gzip")));
+          const j = await s.json();
+          return `${j.length} 行`;
+        });
+        await timed("32 个 r 分片并发", async () => {
+          const jobs = [];
+          for (let i = 0; i < 32; i++) {
+            const f = `r${String(i * 7).padStart(5, "0")}.json`;
+            jobs.push(fetch(`${BASE}/${f}.gz?v=${V}`).then(async (r) => {
+              if (!r.ok) throw new Error("HTTP " + r.status);
+              const j = await new Response(r.body.pipeThrough(new DecompressionStream("gzip"))).json();
+              return j.length;
+            }));
+          }
+          const rows = await Promise.all(jobs);
+          return rows.reduce((a, b) => a + b, 0) + " 行";
+        });
+
+        p("--- 真实搜索（用站点的 search-worker.js）---");
+        await timed("搜索「幼教」前 80 条", () => new Promise((resolve, reject) => {
+          let w;
+          try {
+            w = new Worker(`./search-worker.js?v=${CLIENT_V}`);
+          } catch (e) { reject(e); return; }
+          const timer = setTimeout(() => { w.terminate(); reject(new Error("超过 60 秒")); }, 60000);
+          w.onerror = (e) => { clearTimeout(timer); reject(new Error("worker error: " + (e.message || "?"))); };
+          w.onmessage = (event) => {
+            const r = event.data;
+            if (r.error) { clearTimeout(timer); reject(new Error(r.errorName + ": " + r.error)); return; }
+            if (r.partial && !r.timedOut) return;
+            clearTimeout(timer);
+            w.terminate();
+            resolve(`命中 ${r.data.length} 条 · more=${r.more}`);
+          };
+          w.postMessage({
+            id: 1,
+            base: BASE,
+            version: V,
+            needles: ["幼教"],
+            type: "all",
+            all: false,
+            replacements: [["zzzznotexist"]],
+            limit: 80,
+          });
+        }));
+
+        p("--- 完 ---");
+      })();
+
+      document.getElementById("copy").addEventListener("click", () => {
+        navigator.clipboard.writeText(out.textContent).then(
+          () => { document.getElementById("copy").textContent = "已复制"; },
+          () => { document.getElementById("copy").textContent = "复制失败，请手动选中"; }
+        );
+      });
+    </script>
+  </body>
+</html>
