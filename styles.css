@@ -226,6 +226,35 @@ button {
   opacity: 0;
 }
 
+.cache-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.cache-clear {
+  min-height: 32px;
+  padding: 4px 15px;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  background: #fff;
+  color: #213547;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.cache-clear:active {
+  background: #f0f0f0;
+}
+
+.cache-hint {
+  color: #7a8794;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .radio-group {
   display: inline-flex;
   flex-wrap: wrap;

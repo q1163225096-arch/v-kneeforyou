@@ -42,6 +42,28 @@ const cache = new Map();
 const CACHE_LIMIT = 320;
 const normalize = value => String(value || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 function hash(value) { let n=2166136261; for(let i=0;i<value.length;i++) n=Math.imul(n^value.charCodeAt(i),16777619); return n>>>0; }
+// ---- 持久化缓存：搜过的分片落到浏览器 Cache Storage，下次直接本地读 ----
+let store = null;
+let storeReady = false;
+async function getStore() {
+  if (storeReady) return store;
+  storeReady = true;
+  try {
+    if (typeof caches === 'undefined') return null;
+    const name = `fs-${version}`;
+    store = await caches.open(name);
+    const keys = await caches.keys();
+    for (const key of keys) if (key.startsWith('fs-') && key !== name) caches.delete(key).catch(() => {});
+  } catch (error) {
+    store = null;
+  }
+  return store;
+}
+async function parsePayload(response, file, compressed) {
+  if (file === 'directories.bin') return new Uint8Array(await response.arrayBuffer());
+  if (!compressed) return response.json();
+  return new Response(response.body.pipeThrough(new DecompressionStream('gzip'))).json();
+}
 async function json(file, job) {
   job.controller.signal.throwIfAborted();
   if (cache.has(file)) {
@@ -50,12 +72,21 @@ async function json(file, job) {
   const compressed = file !== 'manifest.json' && file !== 'directories.bin';
   if (job.inflight.has(file)) return job.inflight.get(file);
   const signal = AbortSignal.any([job.controller.signal, AbortSignal.timeout(REQUEST_TIMEOUT)]);
-  const request = fetch(`${base}/${file}${compressed ? '.gz' : ''}?v=${version}`, { signal }).then(async response => {
+  const url = `${base}/${file}${compressed ? '.gz' : ''}?v=${version}`;
+  const request = (async () => {
+    const disk = await getStore();
+    if (disk) {
+      try {
+        const hit = await disk.match(url);
+        if (hit) return await parsePayload(hit, file, compressed);
+      } catch (error) { /* 缓存损坏则回落到网络 */ }
+    }
+    const response = await fetch(url, { signal });
     if (!response.ok) throw new Error(`Search asset ${response.status}: ${file}`);
-    if (file === 'directories.bin') return new Uint8Array(await response.arrayBuffer());
-    if (!compressed) return response.json();
-    return new Response(response.body.pipeThrough(new DecompressionStream('gzip'))).json();
-  });
+    const buffer = await response.arrayBuffer();
+    if (disk) disk.put(url, new Response(buffer, { headers: { 'content-type': 'application/octet-stream' } })).catch(() => {});
+    return parsePayload(new Response(buffer), file, compressed);
+  })();
   job.inflight.set(file,request);
   try {
     const value = await request;
@@ -175,6 +206,7 @@ async function search(message, job) {
   return result;
 }
 self.onmessage=event=>{
+  if(event.data && event.data.clearCache) { store=null; storeReady=false; cache.clear(); return; }
   if(activeJob) activeJob.controller.abort(new DOMException('Superseded','AbortError'));
   latest=event.data.id;
   if(event.data.cancel) return;

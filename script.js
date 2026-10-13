@@ -5,7 +5,7 @@
   const childFiles = data.childFiles || {};
   const PAGE_SIZE = 500;
   const DIRECTORY_PAGE_SIZE = 200;
-const CLIENT_VERSION = "20261011-self-use-3";
+const CLIENT_VERSION = "20261011-self-use-4";
   const SITE_SUBTITLE = "网课课程目录搜索";
   // 站点默认标题（initialize 里会根据 bootstrap 数据再确认一次）。
   // 与 serveStatic / Netlify Edge Function 注入的分享标题保持一致。
@@ -1473,6 +1473,7 @@ function getIndexedParentFolderPath(record) {
         state.searchResults = result.data;
         state.searchMore = result.more;
         state.searchPage = page;
+        refreshCacheHint();
         return;
       }
 
@@ -1719,7 +1720,42 @@ function getIndexedParentFolderPath(record) {
 
   elements.filterToggle.addEventListener("click", () => {
     elements.filters.classList.toggle("is-hidden");
+    refreshCacheHint();
   });
+
+  function refreshCacheHint() {
+    const hint = document.getElementById("cacheHint");
+    if (!hint) return;
+    if (!navigator.storage || !navigator.storage.estimate) return;
+    navigator.storage
+      .estimate()
+      .then((info) => {
+        const mb = (info.usage || 0) / 1048576;
+        if (mb >= 1) hint.textContent = `本站点已在本机占用约 ${mb.toFixed(1)} MB，重搜同样的词会秒出`;
+      })
+      .catch(() => {});
+  }
+  window.setTimeout(refreshCacheHint, 3000);
+
+  const clearCacheBtn = document.getElementById("clearCacheBtn");
+  if (clearCacheBtn) {
+    clearCacheBtn.addEventListener("click", () => {
+      if (searchWorker) { try { searchWorker.postMessage({ clearCache: true }); } catch (error) { /* ignore */ } }
+      const done = () => {
+        showToast("本地搜索缓存已清除");
+        const hint = document.getElementById("cacheHint");
+        if (hint) hint.textContent = "搜过的关键词会缓存在本机，下次秒出";
+      };
+      if (typeof caches !== "undefined" && caches.keys) {
+        caches
+          .keys()
+          .then((keys) => Promise.all(keys.filter((key) => key.startsWith("fs-")).map((key) => caches.delete(key))))
+          .then(done, done);
+      } else {
+        done();
+      }
+    });
+  }
 
   elements.filters.addEventListener("click", async (event) => {
     const button = event.target.closest(".radio-button");

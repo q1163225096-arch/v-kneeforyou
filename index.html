@@ -35,8 +35,8 @@
       content="kneeforyou 网课课程目录搜索入口，支持课程目录、视频教程和学习资料关键词检索。"
     />
     <meta name="twitter:image" content="https://q1163225096-arch.github.io/v-kneeforyou/share-cover-og.png" />
-    <link rel="stylesheet" href="./styles.css?v=20261011-self-use-3" />
-    <link rel="preload" href="./search-worker.js?v=20261011-self-use-3" as="script" />
+    <link rel="stylesheet" href="./styles.css?v=20261011-self-use-4" />
+    <link rel="preload" href="./search-worker.js?v=20261011-self-use-4" as="script" />
     <link rel="preload" href="./data/fast-search/manifest.json?v=20261011b-self-use-flat" as="fetch" crossorigin="anonymous" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <script type="application/ld+json">
@@ -120,6 +120,10 @@
               <button class="radio-button is-active" type="button" data-filter="scope" data-value="global">全盘搜索</button>
               <button class="radio-button" type="button" data-filter="scope" data-value="current">当前目录</button>
             </div>
+            <div class="cache-row">
+              <button class="cache-clear" id="clearCacheBtn" type="button">清除本地搜索缓存</button>
+              <span class="cache-hint" id="cacheHint">搜过的关键词会缓存在本机，下次秒出</span>
+            </div>
           </div>
 
           <nav class="breadcrumb is-hidden" id="breadcrumb" aria-label="面包屑"></nav>
@@ -138,6 +142,6 @@
       window.YYDOCX_ASSET_BASE = ".";
     </script>
     <script src="./data/bootstrap-data.js?v=20261011b-self-use-flat"></script>
-    <script src="./script.js?v=20261011-self-use-3"></script>
+    <script src="./script.js?v=20261011-self-use-4"></script>
   </body>
 </html>
