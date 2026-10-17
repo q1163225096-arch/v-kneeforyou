@@ -9,7 +9,7 @@ if (!source) throw new Error('Usage: node tools/import-123-tree.js <tree.txt>');
 const text = fs.readFileSync(source, 'utf8').replace(/^\uFEFF/, '');
 const lines = text.split(/\r?\n/);
 const namespace = 'local-self-use';
-const version = '20261011b-self-use-flat';
+const version = '20261017-self-use-1';
 const read = p => JSON.parse(fs.readFileSync(path.join(root, p), 'utf8'));
 const write = (p, data) => {
   const target = path.join(root, p);
