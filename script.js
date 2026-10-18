@@ -9,13 +9,13 @@
   // 扫完（例如「幼教」要拉 156 个分片 / 4.2MB）才肯返回，弱网下必然超时。
   // 首屏只取 80 条，剩下的走"加载更多"，分片已有缓存，后续反而更快。
   const SEARCH_FIRST_PAGE = 40;
-const CLIENT_VERSION = "20261018-self-use-11";
+const CLIENT_VERSION = "20261019-dirts-1";
   const SITE_SUBTITLE = "网课课程目录搜索";
   // 站点默认标题（initialize 里会根据 bootstrap 数据再确认一次）。
   // 与 serveStatic / Netlify Edge Function 注入的分享标题保持一致。
   let baseTitle = "";
-  const SEARCH_INDEX_VERSION = "20261017-self-use-1";
-  const PARENT_INDEX_VERSION = "20261017-self-use-1";
+  const SEARCH_INDEX_VERSION = "20261019-dirts-1";
+  const PARENT_INDEX_VERSION = "20261019-dirts-1";
   const PARENT_INDEX_BUCKETS = 32;
   const ASSET_BASE = String(window.YYDOCX_ASSET_BASE || ".").replace(/\/+$/, "");
   const SEARCH_MANIFEST_URL = `${assetUrl("data/search-manifest.json")}?v=${SEARCH_INDEX_VERSION}`;
@@ -93,7 +93,7 @@ const CLIENT_VERSION = "20261018-self-use-11";
   const parentNamesCache = new Map();
   const parentNamesLoading = new Map();
   const HISTORY_KEY = "yydocx-state-v2";
-  const CHILD_INDEX_VERSION = "20261017-self-use-1";
+  const CHILD_INDEX_VERSION = "20261019-dirts-1";
   const selfUseBuckets = new Map();
   let searchWorker = null;
   let fastSearchPartialHandler = null;
@@ -642,8 +642,50 @@ function getIndexedParentFolderPath(record) {
     return DIRTS_EDGE_PROXY_URL;
   }
 
+  // dirts(50 分区) 的子项是变长紧凑格式：
+  //   文件 -> [名称]                （500 万行里文件占九成，只留名称）
+  //   目录 -> [名称, fsId, 1]
+  // 文件大小界面不展示、fsId 静态化后只有目录才用得上，所以两者都不存；
+  // provider / rootId / 完整 path 一律由父记录推导。
+  function expandDirtsCompactEntry(parent, entry) {
+    const rootId = parent.rootId || parent.id;
+    const parentPath = normalizeDisplayPath(parent.path || parent.associationFilePath || "");
+    const base = parentPath === "/" ? "" : parentPath;
+    const pathId = parent.pathId || `dirts-${rootId}`;
+    const data = entry.data.map((item) => {
+      if (!Array.isArray(item)) return item;
+      const name = item[0] || "未命名";
+      const childPath = `${base}/${name}`;
+      const fsId = item[1] || null;
+      return {
+        provider: "dirts",
+        title: name,
+        displayName: name,
+        serverFileName: name,
+        associationFileName: name,
+        associationFilePath: childPath,
+        path: childPath,
+        associationFileId: fsId ? String(fsId) : "",
+        fsId,
+        pathId,
+        id: rootId,
+        rootId,
+        category: item[3] || 6,
+        isDir: item[2] ? 1 : 0,
+        size: item[4] || 0,
+      };
+    });
+    return {
+      data,
+      more: Boolean(entry.more),
+      page: entry.page || 1,
+      pageSize: entry.pageSize || PAGE_SIZE,
+    };
+  }
+
   function expandCompactEntry(parent, entry) {
     if (!entry || entry.format !== "yyc1" || !Array.isArray(entry.data)) return entry;
+    if (parent && parent.provider === "dirts") return expandDirtsCompactEntry(parent, entry);
     const parentPathId = parent && parent.pathId;
     const data = entry.data.map((item) => {
       if (!Array.isArray(item)) return item;
@@ -861,6 +903,12 @@ function getIndexedParentFolderPath(record) {
       return { data: foldersFirstRecords(results), more: true };
     }
 
+    // 旧版搜索分片体积太大（整站容量吃紧）已从仓库移除，压缩索引是唯一来源。
+    // 走到这里说明浏览器缺少 DecompressionStream，只能给出本页已展开过的内容。
+    if (manifest.legacyChunksPacked) {
+      return { data: foldersFirstRecords(results), more: false };
+    }
+
     const initialChunksToScan = Math.min(
       manifest.chunks.length,
       Math.max(1, Math.ceil(limit / PAGE_SIZE)) * SEARCH_CHUNKS_PER_PAGE
@@ -1020,6 +1068,22 @@ function getIndexedParentFolderPath(record) {
     };
   }
 
+  // 自建分区（自用 / 50）的目录太多，256 个分片里每个分片打包上百个目录，
+  // 避免为几万个目录各生成一个 JSON 文件。
+  const BUCKETED_CHILD_FILE = /^(?:self-use|dirts)\/children\/b\d{3}\.json(?:\.gz)?$/;
+  function isBucketedChildFile(file) {
+    return BUCKETED_CHILD_FILE.test(String(file || ""));
+  }
+
+  async function fetchBucketFile(file) {
+    const response = await fetchWithTimeout(`${assetUrl(`data/${file}`)}?v=${CHILD_INDEX_VERSION}`);
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+    if (file.endsWith(".gz")) {
+      return new Response(response.body.pipeThrough(new DecompressionStream("gzip"))).json();
+    }
+    return response.json();
+  }
+
   async function ensureChildren(record) {
     const key = getKey(record);
     const cached = childrenMap[key];
@@ -1032,27 +1096,33 @@ function getIndexedParentFolderPath(record) {
       try {
         const childFile = childFiles[key] || (await indexedChildFile(key));
         if (childFile) {
-          let json;
-          if (record.pathId === "local-self-use") {
-            if (!selfUseBuckets.has(childFile)) {
-              selfUseBuckets.set(childFile, fetchWithTimeout(`${assetUrl(`data/${childFile}`)}?v=${CHILD_INDEX_VERSION}`).then(async response => {
-                if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-                return response.json();
-              }));
-              if (selfUseBuckets.size > 12) selfUseBuckets.delete(selfUseBuckets.keys().next().value);
+          // 50 分区的目录分片是 gzip 的（省下 100MB 站点容量）。浏览器没有
+          // DecompressionStream 时跳过静态分支、回落到下面的实时接口，
+          // 不会比改造前更差。
+          if (!(childFile.endsWith(".gz") && typeof DecompressionStream === "undefined")) {
+            let json;
+            if (isBucketedChildFile(childFile)) {
+              if (!selfUseBuckets.has(childFile)) {
+                selfUseBuckets.set(childFile, fetchBucketFile(childFile));
+                if (selfUseBuckets.size > 12) selfUseBuckets.delete(selfUseBuckets.keys().next().value);
+              }
+              try {
+                const bucket = await selfUseBuckets.get(childFile);
+                // 50 分区里有多份内容完全相同的目录树，只存了一份，其余通过 refs 指过来。
+                json = bucket.entries[key] || (bucket.refs && bucket.refs[key] ? bucket.entries[bucket.refs[key]] : null);
+              }
+              catch (error) { selfUseBuckets.delete(childFile); throw error; }
+              if (!json) throw new Error("Imported directory missing");
+            } else {
+              const response = await fetchWithTimeout(assetUrl(`data/${childFile}`));
+              if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+              json = await response.json();
             }
-            try { json = (await selfUseBuckets.get(childFile)).entries[key]; }
-            catch (error) { selfUseBuckets.delete(childFile); throw error; }
-            if (!json) throw new Error("Imported directory missing");
-          } else {
-            const response = await fetchWithTimeout(assetUrl(`data/${childFile}`));
-            if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-            json = await response.json();
+            const entry = normalizeStaticEntry(record, json);
+            childrenMap[key] = entry;
+            invalidateIndexCache();
+            return entry;
           }
-          const entry = normalizeStaticEntry(record, json);
-          childrenMap[key] = entry;
-          invalidateIndexCache();
-          return entry;
         }
       } catch (error) {
         staticFailed = true;

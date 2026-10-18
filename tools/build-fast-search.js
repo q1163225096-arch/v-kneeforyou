@@ -108,7 +108,10 @@ for (let ci=0;ci<manifest.chunks.length;ci++) {
       dedupKept++;
     }
     if(local&&!item[2]) item[6]=`/${importParents[importParentById.get(item[1])]}/${item[0]}`;
-    const raw = remote ? `${item[1]||''} ${item[2]||''}` : item[0];
+    // 每个分区都只按"标题"建索引；早年 dirts 行额外把整条 path 也塞了进去，
+    // 导致它单行 token 数是别人的 3 倍（91 vs 32），索引膨胀且结果噪音大。
+    // 目录本身同样会被索引，靠目录名一样能搜到，所以这里与其它分区对齐。
+    const raw = remote ? item[1]||'' : item[0];
     const name = normalize(local?raw:String(raw).replace(pattern,'kneeforyou'));
     const chars = Array.from(name);
     const tokens = new Set(chars.map(c=>'c'+c));
