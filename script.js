@@ -9,7 +9,7 @@
   // 扫完（例如「幼教」要拉 156 个分片 / 4.2MB）才肯返回，弱网下必然超时。
   // 首屏只取 80 条，剩下的走"加载更多"，分片已有缓存，后续反而更快。
   const SEARCH_FIRST_PAGE = 40;
-const CLIENT_VERSION = "20261018-self-use-10";
+const CLIENT_VERSION = "20261018-self-use-11";
   const SITE_SUBTITLE = "网课课程目录搜索";
   // 站点默认标题（initialize 里会根据 bootstrap 数据再确认一次）。
   // 与 serveStatic / Netlify Edge Function 注入的分享标题保持一致。
@@ -126,8 +126,8 @@ const CLIENT_VERSION = "20261018-self-use-10";
     }
   }
 
-  function fetchWithTimeout(url, options = {}) {
-    const timeout = AbortSignal.timeout(15000);
+  function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+    const timeout = AbortSignal.timeout(timeoutMs);
     const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
     return fetch(url, { ...options, signal });
   }
@@ -966,16 +966,31 @@ function getIndexedParentFolderPath(record) {
     return state.searching ? filtered.slice(0, 500) : filtered;
   }
 
-  async function postJson(url, body, extraHeaders = {}) {
+  async function postJson(url, body, extraHeaders = {}, timeoutMs = 15000) {
     const response = await fetchWithTimeout(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...extraHeaders },
       body: JSON.stringify(body),
-    });
+    }, timeoutMs);
     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
     const json = await response.json();
     if (json && Number(json.errorCode) > 0) throw new Error(json.msg || `errorCode ${json.errorCode}`);
     return json;
+  }
+
+  // dirts 动态目录是「手机 → Cloudflare Worker → dirts 上游」的两跳链路，
+  // 4G 上光握手就很慢，默认 15 秒不够用。给它更长的超时并自动重试一次。
+  async function postJsonWithRetry(url, body, extraHeaders = {}, timeoutMs = 35000, retries = 1) {
+    let lastError = null;
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      if (attempt) await new Promise((resolve) => setTimeout(resolve, 800));
+      try {
+        return await postJson(url, body, extraHeaders, timeoutMs);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError;
   }
 
   function folderRequest(record, page, size) {
@@ -1056,7 +1071,7 @@ function getIndexedParentFolderPath(record) {
       state.loading = true;
       render();
       try {
-        const json = await postJson(dirtsListUrl(), dirtsDirectRequest(record));
+        const json = await postJsonWithRetry(dirtsListUrl(), dirtsDirectRequest(record), {}, 35000, 1);
         const entry = {
           data: normalizeLoadedRecords(record, Array.isArray(json.data) ? json.data : Array.isArray(json.result) ? json.result : []),
           more: false,
@@ -1067,7 +1082,7 @@ function getIndexedParentFolderPath(record) {
         invalidateIndexCache();
         return entry;
       } catch (error) {
-        showToast("\u52a0\u8f7d\u76ee\u5f55\u5931\u8d25");
+        showToast("\u76ee\u5f55\u52a0\u8f7d\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u7f51\u7edc\u540e\u91cd\u8bd5");
         return null;
       } finally {
         state.loading = false;
