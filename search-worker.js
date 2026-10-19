@@ -48,6 +48,9 @@ const SEARCH_TIMEOUT = 45000;
 const PARTIAL_INTERVAL_MS = 1200;
 const cache = new Map();
 const CACHE_LIMIT = 320;
+// 单次搜索最多拉多少个行块（r*.json）。行块平均约 30KB，160 个约 5MB，
+// 是弱网（4G 三格）下可接受的上限；再多就会撞上 SEARCH_TIMEOUT 变成"搜不出来"。
+const MAX_ROW_FETCHES = 160;
 const normalize = value => String(value || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 function hash(value) { let n=2166136261; for(let i=0;i<value.length;i++) n=Math.imul(n^value.charCodeAt(i),16777619); return n>>>0; }
 // ---- 持久化缓存：搜过的分片落到浏览器 Cache Storage，下次直接本地读 ----
@@ -153,38 +156,53 @@ async function search(message, job) {
   if(!directoryBits && type!=='all') {
     directoryBits=await json('directories.bin', job);
   }
-  const tokens=new Set();
-  if(!all) for(const needle of needles) {
-    // Use character postings for candidate selection. Bigram postings are
-    // useful for narrowing a single continuous term, but a query without
-    // spaces can cross a separator in the stored name (for example,
-    // "自我 管理"), making a cross-boundary bigram such as "我管" absent.
-    // Character candidates avoid that false negative; the full normalized
-    // text check below still enforces the exact term match.
-    for(const character of Array.from(needle)) tokens.add('c'+character);
-  }
   let candidates=null;
-  if(tokens.size) {
-    const entries=[];
-    const tokenList=[...tokens];
-    for(let start=0;start<tokenList.length;start+=CONCURRENCY) {
-      const batch=await Promise.all(tokenList.slice(start,start+CONCURRENCY).map(async token=>{
-        const bucket=await json(`p${String(hash(token)%metadata.shardCount).padStart(4,'0')}.json`,job);
-        return bucket[token]||[0,''];
-      }));
-      entries.push(...batch);
-      if(batch.some(entry=>entry[0]===0)) break;
+  if(!all) {
+    // 候选 token 有两套：二元组(bigram) 和 单字符。
+    // bigram 精确得多 —— 例如搜 "ket"，单字符 c_k/c_e/c_t 在 648 万条里都极高频，
+    // 交集后候选仍有几十万，后续要拉上千个行块（实测 1249 个请求 / 42.82MB），
+    // 弱网下必然超时失败。bigram b_ke/b_et 的候选只有几百，秒出且流量可忽略。
+    // 风险是跨分隔符：如「自我 管理」搜「我管」，bigram "我管" 在索引里不存在，
+    // 所以 bigram 任一缺失就整体回退字符级，保证不漏召回。
+    const grams=new Set(), chars=new Set();
+    for(const needle of needles) {
+      const list=Array.from(needle);
+      for(const ch of list) chars.add('c'+ch);
+      if(list.length>=2) for(let i=0;i<list.length-1;i++) grams.add('b'+list[i]+list[i+1]);
     }
+    const collect=async tokenList=>{
+      const entries=[];
+      for(let start=0;start<tokenList.length;start+=CONCURRENCY) {
+        const batch=await Promise.all(tokenList.slice(start,start+CONCURRENCY).map(async token=>{
+          const bucket=await json(`p${String(hash(token)%metadata.shardCount).padStart(4,'0')}.json`,job);
+          return bucket[token]||[0,''];
+        }));
+        entries.push(...batch);
+        // 任一 token 在索引里缺失 => 这套不可用（可能是跨分隔符），交给调用方回退
+        if(batch.some(entry=>entry[0]===0)) return null;
+      }
+      return entries;
+    };
+    // 先试 bigram（省流量），不行再退回字符级（保召回）
+    let entries = grams.size ? await collect([...grams]) : null;
+    if(!entries) entries = await collect([...chars]);
     if(id!==latest) return;
-    entries.sort((a,b)=>a[0]-b[0]);
-    candidates=decode(entries[0]);
-    for(let i=1;i<entries.length&&candidates.length;i++) candidates=intersect(candidates,decode(entries[i]));
+    if(entries) {
+      entries.sort((a,b)=>a[0]-b[0]);
+      candidates=decode(entries[0]);
+      for(let i=1;i<entries.length&&candidates.length;i++) candidates=intersect(candidates,decode(entries[i]));
+    }
   }
   const result=job.result;
   const seen=new Set();
   const length=candidates===null?metadata.total:candidates.length;
   let cursor=0;
+  // 弱网兜底：候选过多时（例如搜到了极高频的字）行块会越拉越多，
+  // 实测曾一次拉 1249 个 / 42.82MB，弱网根本下不完直接超时。
+  // 这里给单次搜索的行块请求数设上限，超出就先把已有结果交给页面（点"加载更多"可继续）。
+  let rowFetches=0;
   while(cursor<length && result.length<=limit) {
+    if(rowFetches>=MAX_ROW_FETCHES) break;
     job.controller.signal.throwIfAborted();
     const groups=[];
     while(cursor<length) {
@@ -203,6 +221,7 @@ async function search(message, job) {
     group.ids.push(docId);cursor++;
     }
     const batches=await Promise.all(groups.map(group=>json(`r${String(group.chunk).padStart(5,'0')}.json`,job)));
+    rowFetches+=groups.length;
     if(id!==latest) return;
     for(let g=0;g<groups.length && result.length<=limit;g++) for(const docId of groups[g].ids) {
     const item=batches[g][docId%metadata.rowSize];
