@@ -345,6 +345,9 @@ button.crumb-search:hover {
 
 .file-list {
   display: grid;
+  /* 单列也要 minmax(0,1fr)：默认 auto 列会被最宽的子元素（分页条）撑开，
+     整列跟着横向溢出，窄屏上「末页」按钮会被裁掉。 */
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
 }
 
@@ -515,6 +518,148 @@ button.crumb-search:hover {
   color: #4a57d6;
   font-size: 14px;
   font-weight: 500;
+}
+
+/* 目录分页条：首页/上一页 + 页码下拉 + 下一页/末页，下面再给一个输入框直接跳。
+   页码下拉是主力交互，按钮只是兜底，手机上一次点击就能到位。
+   窄屏放不下 5 个控件，所以整体允许换行，控件自身不许被压扁。 */
+.pager {
+  margin-top: 10px;
+  padding: 10px 8px;
+  border: 1px solid #e3e6f5;
+  border-radius: 10px;
+  background: #fbfcff;
+}
+
+.pager-bar,
+.pager-jump {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.pager-jump {
+  margin-top: 8px;
+}
+
+.pager-step {
+  flex: 0 0 auto;
+  min-width: 50px;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid #d7dcf5;
+  border-radius: 6px;
+  background: #fff;
+  color: #4a57d6;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pager-step:hover:not(:disabled) {
+  background: #eef1ff;
+}
+
+.pager-step:disabled {
+  border-color: #e8eaf3;
+  background: #f7f8fb;
+  color: #b6bcc9;
+  cursor: not-allowed;
+}
+
+.pager-step-primary {
+  border-color: #4a57d6;
+  background: #4a57d6;
+  color: #fff;
+}
+
+.pager-step-primary:hover:not(:disabled) {
+  background: #3d49c4;
+}
+
+.pager-picker {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.pager-select {
+  flex: 0 1 auto;
+  min-width: 76px;
+  max-width: 128px;
+  min-height: 30px;
+  padding: 4px 6px;
+  border: 1px solid #d7dcf5;
+  border-radius: 6px;
+  background: #fff;
+  color: #1f2937;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pager-of {
+  white-space: nowrap;
+}
+
+.pager-input {
+  flex: 0 0 auto;
+  width: 84px;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 1px solid #d7dcf5;
+  border-radius: 6px;
+  background: #fff;
+  color: #1f2937;
+  font-size: 13px;
+  text-align: center;
+}
+
+.pager-input::-webkit-outer-spin-button,
+.pager-input::-webkit-inner-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+}
+
+.pager-total {
+  flex: 1 0 100%;
+  font-size: 12px;
+  color: #8b90a0;
+  text-align: center;
+}
+
+/* 窄屏（大部分用户都在手机上）：一行塞不下 5 个控件。
+   主路径是「页码下拉」和「输入页码跳转」，首页/末页是补充，
+   这里让它们换行显示，按钮全部保持原始宽度不被压扁。 */
+@media (max-width: 460px) {
+  .pager-step {
+    min-width: 46px;
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+
+  .pager-select {
+    min-width: 68px;
+    max-width: 108px;
+    font-size: 12px;
+  }
+
+  .pager-picker {
+    font-size: 12px;
+  }
+
+  .pager-input {
+    width: 72px;
+    font-size: 12px;
+  }
 }
 
 .load-more:hover {

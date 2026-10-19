@@ -9,13 +9,13 @@
   // 扫完（例如「幼教」要拉 156 个分片 / 4.2MB）才肯返回，弱网下必然超时。
   // 首屏只取 80 条，剩下的走"加载更多"，分片已有缓存，后续反而更快。
   const SEARCH_FIRST_PAGE = 40;
-const CLIENT_VERSION = "20261019-dirts-2";
+const CLIENT_VERSION = "20261019-pager-1";
   const SITE_SUBTITLE = "网课课程目录搜索";
   // 站点默认标题（initialize 里会根据 bootstrap 数据再确认一次）。
   // 与 serveStatic / Netlify Edge Function 注入的分享标题保持一致。
   let baseTitle = "";
-  const SEARCH_INDEX_VERSION = "20261019-dirts-2";
-  const PARENT_INDEX_VERSION = "20261019-dirts-2";
+  const SEARCH_INDEX_VERSION = "20261019-pager-1";
+  const PARENT_INDEX_VERSION = "20261019-pager-1";
   const PARENT_INDEX_BUCKETS = 32;
   const ASSET_BASE = String(window.YYDOCX_ASSET_BASE || ".").replace(/\/+$/, "");
   const SEARCH_MANIFEST_URL = `${assetUrl("data/search-manifest.json")}?v=${SEARCH_INDEX_VERSION}`;
@@ -93,7 +93,7 @@ const CLIENT_VERSION = "20261019-dirts-2";
   const parentNamesCache = new Map();
   const parentNamesLoading = new Map();
   const HISTORY_KEY = "yydocx-state-v2";
-  const CHILD_INDEX_VERSION = "20261019-dirts-2";
+  const CHILD_INDEX_VERSION = "20261019-pager-1";
   const selfUseBuckets = new Map();
   let searchWorker = null;
   let fastSearchPartialHandler = null;
@@ -1738,6 +1738,39 @@ function getIndexedParentFolderPath(record) {
     elements.breadcrumb.innerHTML = parts.join("");
   }
 
+// 目录当前一共多少页。分页控件（首页/上一页/页码下拉/输入跳转/下一页/末页）
+// 和点击处理都从这里取总页数，避免两处各算一遍导致口径不一致。
+  function directoryPageCount() {
+    return Math.max(1, Math.ceil(visibleRecords().length / DIRECTORY_PAGE_SIZE));
+  }
+
+// 页码下拉的可选项。页数不多时把 1..N 全列出来；页数很多时只列当前页附近的
+// 一段 + 首页 + 末页，中间用「…」占位，否则一个 <select> 里塞几千个
+// <option> 在老手机上会明显卡。
+  function directoryPageOptions(current, total) {
+    const LIMIT = 300;
+    let pages;
+    if (total <= LIMIT) {
+      pages = Array.from({ length: total }, (unused, i) => i + 1);
+    } else {
+      const span = 120;
+      const start = Math.max(2, current - span);
+      const end = Math.min(total - 1, current + span);
+      pages = [1];
+      for (let p = start; p <= end; p += 1) pages.push(p);
+      pages.push(total);
+    }
+    return pages
+      .map((page, index) => {
+        // 相邻两页之间跳号了，补一个不可选的省略项，提示这里是省略显示
+        if (index > 0 && page - pages[index - 1] > 1) {
+          return `<option value="" disabled>…</option>`;
+        }
+        return `<option value="${page}" ${page === current ? "selected" : ""}>第 ${page} 页</option>`;
+      })
+      .join("");
+  }
+
   function renderList() {
     const isHomeList = !state.searching && state.stack.length === 0;
     elements.list.classList.toggle("is-home-list", isHomeList);
@@ -1790,7 +1823,23 @@ function getIndexedParentFolderPath(record) {
       ? `<button class="load-more" type="button" data-action="load-more">${state.loadingMore ? "加载中" : "加载更多"}</button>`
       : "";
     const pager = !state.searching && directoryPages > 1
-      ? `<nav aria-label="目录分页"><button class="load-more" data-action="directory-prev" ${state.directoryPage === 1 ? "disabled" : ""}>上一页</button><span>第 ${state.directoryPage} / ${directoryPages} 页 · 共 ${allRecords.length} 项</span><button class="load-more" data-action="directory-next" ${state.directoryPage === directoryPages ? "disabled" : ""}>下一页</button></nav>` : "";
+      ? `<nav aria-label="目录分页" class="pager">
+          <div class="pager-bar">
+            <button type="button" class="pager-step" data-action="directory-first" ${state.directoryPage === 1 ? "disabled" : ""}>首页</button>
+            <button type="button" class="pager-step" data-action="directory-prev" ${state.directoryPage === 1 ? "disabled" : ""}>上一页</button>
+            <label class="pager-picker">
+              <select class="pager-select" data-action="directory-goto" aria-label="选择页码">${directoryPageOptions(state.directoryPage, directoryPages)}</select>
+              <span class="pager-of">共 ${directoryPages} 页</span>
+            </label>
+            <button type="button" class="pager-step" data-action="directory-next" ${state.directoryPage === directoryPages ? "disabled" : ""}>下一页</button>
+            <button type="button" class="pager-step" data-action="directory-last" ${state.directoryPage === directoryPages ? "disabled" : ""}>末页</button>
+          </div>
+          <div class="pager-jump">
+            <input class="pager-input" type="number" inputmode="numeric" min="1" max="${directoryPages}" placeholder="输入页码" aria-label="输入页码" />
+            <button type="button" class="pager-step pager-step-primary" data-action="directory-jump">跳转</button>
+            <span class="pager-total">共 ${allRecords.length} 项 · 每页 ${DIRECTORY_PAGE_SIZE} 项</span>
+          </div>
+        </nav>` : "";
     elements.list.innerHTML = rows + pager + moreRow;
   }
 
@@ -1926,11 +1975,50 @@ function getIndexedParentFolderPath(record) {
     jumpTo(Number(crumb.dataset.crumb));
   });
 
+// 统一跳页：夹在 1..总页数之间，渲染后回到顶部并存历史。
+  function goToDirectoryPage(page, mode) {
+    const total = directoryPageCount();
+    let target = Number(page);
+    if (!Number.isFinite(target) || target < 1) {
+      showToast("请输入正确的页码");
+      return;
+    }
+    target = Math.min(total, Math.round(target));
+    if (mode === "directory-first") target = 1;
+    if (mode === "directory-last") target = total;
+    state.directoryPage = target;
+    render();
+    restoreScrollTop(0);
+    saveHistoryState(true);
+  }
+
+  // 页码下拉：选了直接跳，不用反复点上一页/下一页
+  elements.list.addEventListener("change", (event) => {
+    const select = event.target.closest("[data-action='directory-goto']");
+    if (!select) return;
+    goToDirectoryPage(Number(select.value));
+  });
+
+  // 输入框里回车也能跳
+  elements.list.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    const input = event.target.closest(".pager-input");
+    if (!input) return;
+    event.preventDefault();
+    goToDirectoryPage(Number(input.value));
+  });
+
   elements.list.addEventListener("click", async (event) => {
-    const pageButton = event.target.closest("[data-action^='directory-']");
+    const pageButton = event.target.closest(".pager-step");
     if (pageButton && !pageButton.disabled) {
-      state.directoryPage += pageButton.dataset.action === "directory-next" ? 1 : -1;
-      render(); restoreScrollTop(0); saveHistoryState(true); return;
+      const action = pageButton.dataset.action;
+      if (action === "directory-jump") {
+        const input = pageButton.parentElement.querySelector(".pager-input");
+        goToDirectoryPage(Number(input && input.value));
+      } else {
+        goToDirectoryPage(state.directoryPage + (action === "directory-next" ? 1 : action === "directory-prev" ? -1 : 0), action);
+      }
+      return;
     }
     const loadMoreButton = event.target.closest("[data-action='load-more']");
     if (loadMoreButton) {
