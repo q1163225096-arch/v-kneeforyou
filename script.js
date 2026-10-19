@@ -1079,7 +1079,12 @@ function getIndexedParentFolderPath(record) {
     const response = await fetchWithTimeout(`${assetUrl(`data/${file}`)}?v=${CHILD_INDEX_VERSION}`);
     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
     if (file.endsWith(".gz")) {
-      return new Response(response.body.pipeThrough(new DecompressionStream("gzip"))).json();
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (typeof DecompressionStream !== "undefined") {
+        return new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"))).json();
+      }
+      // 兜底：纯 JS 解压（fflate），兼容缺 DecompressionStream 的浏览器
+      return JSON.parse(new TextDecoder().decode(fflate.gunzipSync(bytes)));
     }
     return response.json();
   }
@@ -1096,12 +1101,11 @@ function getIndexedParentFolderPath(record) {
       try {
         const childFile = childFiles[key] || (await indexedChildFile(key));
         if (childFile) {
-          // 50 分区的目录分片是 gzip 的（省下 100MB 站点容量）。浏览器没有
-          // DecompressionStream 时跳过静态分支、回落到下面的实时接口，
-          // 不会比改造前更差。
-          if (!(childFile.endsWith(".gz") && typeof DecompressionStream === "undefined")) {
-            let json;
-            if (isBucketedChildFile(childFile)) {
+          // 50 分区目录分片是 gzip（省 ~100MB 容量）。gzip 解压有两条路：
+          // 现代浏览器用 DecompressionStream；缺它的老内核由 fflate 纯 JS 兜底
+          // （见 fetchBucketFile），因此这里不再因缺 DecompressionStream 而跳过静态分支。
+          let json;
+          if (isBucketedChildFile(childFile)) {
               if (!selfUseBuckets.has(childFile)) {
                 selfUseBuckets.set(childFile, fetchBucketFile(childFile));
                 if (selfUseBuckets.size > 12) selfUseBuckets.delete(selfUseBuckets.keys().next().value);
@@ -1122,7 +1126,6 @@ function getIndexedParentFolderPath(record) {
             childrenMap[key] = entry;
             invalidateIndexCache();
             return entry;
-          }
         }
       } catch (error) {
         staticFailed = true;
@@ -1486,14 +1489,9 @@ function getIndexedParentFolderPath(record) {
   }
 
   function fastSearch(limit, onPartial) {
-    // iOS 16.4 以下的 Safari、过旧的微信内置内核没有 DecompressionStream，
-    // 快速索引的分片解不开（虽然 search-worker.js 里补了 AbortSignal 但补不了解压）。
-    // 这种情况下直接走完整索引，别让用户白等一轮 20 秒再看到"没有找到"。
-    if (typeof DecompressionStream === "undefined") {
-      const error = new Error("DecompressionStream unavailable");
-      error.name = "NotSupportedError";
-      return Promise.reject(error);
-    }
+    // 快速索引分片是 gzip 的。现代浏览器用 DecompressionStream 解开；
+    // 缺它的老浏览器（iOS 16.4 以下 Safari / 旧微信内核）由 search-worker.js
+    // 里的 fflate 纯 JS 解压兜底，因此这里不再因缺 DecompressionStream 而拒绝。
     fastSearchPartialHandler = typeof onPartial === "function" ? onPartial : null;
     if (!searchWorker) {
       searchWorker = new Worker(`./search-worker.js?v=${CLIENT_VERSION}`);

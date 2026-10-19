@@ -1,5 +1,9 @@
 /* Static, on-demand inverted index. No full-catalog download on each search. */
 'use strict';
+// 老浏览器 / 微信内置内核没有 DecompressionStream：拉一份纯 JS 解压库作兜底，
+// 让快速搜索在所有浏览器都能解开 gzip 分片。（fflate 加载失败也不影响有
+// DecompressionStream 的现代浏览器，下方 parsePayload 会优雅回落。）
+try { importScripts('fflate.min.js'); } catch (e) { /* fflate 不可用，忽略 */ }
 // ---- 旧浏览器兼容（微信内置浏览器 / iOS 17.4 以下 / Chrome 116 以下）----
 // 下面 json() 用到 AbortSignal.any / AbortSignal.timeout；缺失时整个快速搜索
 // 会抛错并回退到慢路径。补上等价实现后这些设备也能走快速索引。
@@ -63,7 +67,15 @@ async function getStore() {
 async function parsePayload(response, file, compressed) {
   if (file === 'directories.bin') return new Uint8Array(await response.arrayBuffer());
   if (!compressed) return response.json();
-  return new Response(response.body.pipeThrough(new DecompressionStream('gzip'))).json();
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (typeof DecompressionStream !== 'undefined') {
+    return new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).json();
+  }
+  // 兜底：纯 JS 解压（fflate），兼容缺 DecompressionStream 的浏览器
+  if (typeof fflate !== 'undefined') {
+    return JSON.parse(new TextDecoder().decode(fflate.gunzipSync(bytes)));
+  }
+  return new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).json();
 }
 async function json(file, job) {
   job.controller.signal.throwIfAborted();
