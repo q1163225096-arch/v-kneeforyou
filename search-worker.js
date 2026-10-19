@@ -34,7 +34,10 @@ let metadata;
 let directoryBits;
 let replacement;
 let activeJob;
-const CONCURRENCY = 6;
+// posting 分片（p*.json.gz，平均 ~39KB）并发。原来 6，实测单次搜索要拉 ~100 个分片，
+// 分 17 批串行等待，弱网下极易撞上 REQUEST_TIMEOUT 导致整次搜索失败。放宽到 16 后
+// 批次数减半以上（行块 r*.json 从 6 放宽到 32 时实测 29.6s -> 5.0s，同理）。
+const CONCURRENCY = 16;
 // 行块（r*.json）体积小、数量多，稀疏关键词一次搜索往往要拉上百个，
 // 并发放宽到 32 能显著缩短总耗时（实测「幼教」：并发6=29.6s，16=9.1s，32=5.0s）。
 const ROW_CONCURRENCY = 32;
