@@ -9,7 +9,7 @@
   // 扫完（例如「幼教」要拉 156 个分片 / 4.2MB）才肯返回，弱网下必然超时。
   // 首屏只取 80 条，剩下的走"加载更多"，分片已有缓存，后续反而更快。
   const SEARCH_FIRST_PAGE = 40;
-const CLIENT_VERSION = "20261019-search-2";
+const CLIENT_VERSION = "20261020-dirfix-1";
   const SITE_SUBTITLE = "网课课程目录搜索";
   // 站点默认标题（initialize 里会根据 bootstrap 数据再确认一次）。
   // 与 serveStatic / Netlify Edge Function 注入的分享标题保持一致。
@@ -99,7 +99,7 @@ const CLIENT_VERSION = "20261019-search-2";
   const parentNamesCache = new Map();
   const parentNamesLoading = new Map();
   const HISTORY_KEY = "yydocx-state-v2";
-  const CHILD_INDEX_VERSION = "20261019-pager-1";
+  const CHILD_INDEX_VERSION = "20261020-dirfix-1";
   const selfUseBuckets = new Map();
   let searchWorker = null;
   let fastSearchPartialHandler = null;
@@ -580,6 +580,13 @@ function getIndexedParentFolderPath(record) {
     if (state.searching && !Array.isArray(state.searchResults)) {
       await runSearch(state.searchPage, false);
     } else {
+      // history 里恢复出来的目录层级，childrenMap 里不一定有数据（例如这一层是
+      // 从搜索结果按祖先链推出来的，从来没真正加载过）。不补加载就会渲染出空白
+      // 列表，而且没有任何地方会再去拉数据 —— 表现为"后退一次目录就空了"。
+      const folder = currentFolder();
+      if (folder && folder.record && !childrenMap[folder.key]) {
+        await ensureChildren(folder.record);
+      }
       render();
     }
     restoreScrollTop(historyState.scrollTop);
@@ -1095,6 +1102,15 @@ function getIndexedParentFolderPath(record) {
     return response.json();
   }
 
+  // dirts 接口出错时不会返回 data/result，只给 errorCode+msg（例如 100006
+  // 「该链接不存在」）。这种情况必须和"目录真的是空的"区分开：一旦当成空目录
+  // 缓存进 childrenMap，本次会话里这个目录就再也打不开了，刷新前一直是空白。
+  function isDirtsErrorResponse(json) {
+    if (!json || typeof json !== "object") return true;
+    if (Array.isArray(json.data) || Array.isArray(json.result)) return false;
+    return Boolean(json.errorCode || json.msg || json.message || json.error);
+  }
+
   async function ensureChildren(record) {
     const key = getKey(record);
     const cached = childrenMap[key];
@@ -1151,6 +1167,10 @@ function getIndexedParentFolderPath(record) {
       render();
       try {
         const json = await postJsonWithRetry(dirtsListUrl(), dirtsDirectRequest(record), {}, 35000, 1);
+        if (isDirtsErrorResponse(json)) {
+          showToast("\u8be5\u76ee\u5f55\u6682\u672a\u6536\u5f55\uff0c\u65e0\u6cd5\u5728\u7ebf\u83b7\u53d6");
+          return null;
+        }
         const entry = {
           data: normalizeLoadedRecords(record, Array.isArray(json.data) ? json.data : Array.isArray(json.result) ? json.result : []),
           more: false,
@@ -1183,6 +1203,10 @@ function getIndexedParentFolderPath(record) {
         record.provider === "dirts" ? "./api/dirts/list" : "./api/list",
         record.provider === "dirts" ? dirtsDirectRequest(record) : folderRequest(record, 1, PAGE_SIZE)
       );
+      if (record.provider === "dirts" && isDirtsErrorResponse(json)) {
+        showToast("\u8be5\u76ee\u5f55\u6682\u672a\u6536\u5f55\uff0c\u65e0\u6cd5\u5728\u7ebf\u83b7\u53d6");
+        return null;
+      }
       const entry = {
         data: normalizeLoadedRecords(record, Array.isArray(json.data) ? json.data : Array.isArray(json.result) ? json.result : []),
         more: record.provider === "dirts" ? false : Boolean(json.more),
