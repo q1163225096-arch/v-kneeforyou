@@ -38,7 +38,7 @@ const CLIENT_VERSION = "20261020-dirfix-1";
     stack: [],
     query: "",
     searching: false,
-    type: "all",
+    type: "dir",
     scope: "global",
     loading: false,
     loadingMore: false,
@@ -553,7 +553,7 @@ function getIndexedParentFolderPath(record) {
       : [];
     state.query = historyState.query || "";
     state.searching = Boolean(historyState.searching && state.query);
-    state.type = historyState.type || "all";
+    state.type = historyState.type || "dir";
     state.scope = historyState.scope || "global";
     state.searchResults = Array.isArray(historyState.searchResults) ? historyState.searchResults : null;
     state.searchMore = Boolean(historyState.searchMore);
@@ -621,7 +621,7 @@ function getIndexedParentFolderPath(record) {
         path: (params.get("path") || "").trim(),
       };
     } catch (error) {
-      return { query: "", type: "all", scope: "global", page: 1, path: "" };
+      return { query: "", type: "dir", scope: "global", page: 1, path: "" };
     }
   }
 
@@ -1500,7 +1500,7 @@ function getIndexedParentFolderPath(record) {
     state.loading = false;
     state.loadingMore = false;
     state.query = saved.query;
-    state.type = saved.type || "all";
+    state.type = saved.type || "dir";
     state.scope = saved.scope || "global";
     state.searching = true;
     state.searchResults = Array.isArray(saved.searchResults) ? saved.searchResults : null;
@@ -1629,6 +1629,23 @@ function getIndexedParentFolderPath(record) {
         state.searchResults = result.data;
         state.searchMore = result.more;
         state.searchPage = page;
+        // 默认先搜文件夹；全盘都搜不到同名文件夹时，自动兜底去搜文件内容，
+        // 避免用户以为"搜不到"。兜底结果会在结果区顶部给出提示。
+        if (state.type === "dir" && result.data.length === 0 && !state.searchFallback) {
+          state.searchFallback = true;
+          const prevType = state.type;
+          state.type = "all";
+          try {
+            await runSearch(page, false);
+            return;
+          } catch (e) {
+            // 兜底也失败则保留空结果，由 emptyStateText 说明
+          } finally {
+            state.type = prevType;
+          }
+          state.searchFallback = false;
+        }
+        state.searchFallback = false;
         refreshCacheHint();
         return;
       }
@@ -1870,7 +1887,10 @@ function getIndexedParentFolderPath(record) {
             <span class="pager-total">共 ${allRecords.length} 项 · 每页 ${DIRECTORY_PAGE_SIZE} 项</span>
           </div>
         </nav>` : "";
-    elements.list.innerHTML = rows + pager + moreRow;
+    const fallbackBanner = state.searching && state.searchFallback
+      ? '<div class="search-fallback-hint">未找到名为“' + escapeHtml(state.query) + '”的文件夹，已为你搜索文件内容</div>'
+      : "";
+    elements.list.innerHTML = fallbackBanner + rows + pager + moreRow;
   }
 
   function render() {
@@ -1879,6 +1899,11 @@ function getIndexedParentFolderPath(record) {
   }
 
   function emptyStateText() {
+    if (state.searching && state.type === "dir") {
+      return state.searchFallback
+        ? "没有找到“" + state.query + "”相关的文件夹或文件内容"
+        : "没有找到名为“" + state.query + "”的文件夹，可把类型切到“全部类型”来搜索文件内容";
+    }
     if (!state.searching) {
       if (currentFolder()) return "此文件夹为空（目录导出中没有文件）";
       return "暂无数据";
@@ -1919,6 +1944,7 @@ function getIndexedParentFolderPath(record) {
     if (!query) { searchGeneration++; cancelSearch(); state.loading = false; state.loadingMore = false; }
     state.searching = Boolean(query);
     state.searchResults = null;
+    state.searchFallback = false;
     state.searchMore = false;
     state.searchPage = 1;
     if (state.searching) {
