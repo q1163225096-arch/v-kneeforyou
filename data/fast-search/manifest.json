@@ -1,1 +1,1 @@
-{"format":"bigram-postings-v1","version":"20261020-selfuse-other","total":6498717,"folders":283688,"files":6215029,"rowSize":1000,"rowChunks":6499,"shardCount":2048,"tokens":1301068}
+{"format":"bigram-postings-v1","version":"20261021-extstrip-1","total":6498717,"folders":278571,"files":6220146,"rowSize":1000,"rowChunks":6499,"shardCount":2048,"tokens":1292328}

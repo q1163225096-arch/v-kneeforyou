@@ -23,7 +23,7 @@ const CLIENT_VERSION = "20261020-dirfix-1";
   // 都会让 worker 的 Cache Storage 桶名变化、旧桶被删除 —— 用户已缓存的上百个分片全部作废，
   // 每次升级都要重新冷启动下载 ~100 个分片 / ~4MB，弱网下就是「搜索很慢 + 一直失败」。
   // 现在固定住这个值：值沿用当前线上用户缓存里已有的版本，老用户缓存可直接续用，零额外冷启动。
-  const FAST_SEARCH_INDEX_VERSION = "20261019-pager-1";
+  const FAST_SEARCH_INDEX_VERSION = "20261021-extstrip-1";
   const SEARCH_MANIFEST_URL = `${assetUrl("data/search-manifest.json")}?v=${SEARCH_INDEX_VERSION}`;
   const SEARCH_CHUNKS_PER_PAGE = 10;
   const SEARCH_INITIAL_TIME_BUDGET_MS = 8000;

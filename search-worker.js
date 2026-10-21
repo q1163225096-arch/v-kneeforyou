@@ -142,6 +142,14 @@ function itemText(item) {
 function isFolderRow(item) {
   return item[0]===1 ? Boolean(item[6]) : Boolean(item[2]);
 }
+// 顶层容器文件夹「课程 / 资料」不进搜索结果（避免污染、节省结果位）。
+// 索引构建时已让这两个名字不出 posting；这里在结果层再做一次兜底，
+// 覆盖 worker 全表扫描（all 模式）等任何可能漏出的路径。
+const EXCLUDED_FOLDERS = new Set(['课程', '资料']);
+function isExcludedFolder(item) {
+  const raw = item[0] === 1 ? item[1] : item[0];
+  return EXCLUDED_FOLDERS.has(normalize(raw));
+}
 // Stable partition: folders first, files after; relative (relevance) order
 // within each group is preserved.
 function foldersFirst(list) {
@@ -225,6 +233,7 @@ async function search(message, job) {
     if(id!==latest) return;
     for(let g=0;g<groups.length && result.length<=limit;g++) for(const docId of groups[g].ids) {
     const item=batches[g][docId%metadata.rowSize];
+    if(isExcludedFolder(item)) continue;
     const text=itemText(item);
     if(!all&&!needles.every(needle=>text.includes(needle))) continue;
     const key=item[0]===1?`d:${item[5]}:${item[2]}:${item[4]}`:`y:${item[5]}:${item[1]}`;
