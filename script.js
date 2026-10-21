@@ -9,7 +9,7 @@
   // 扫完（例如「幼教」要拉 156 个分片 / 4.2MB）才肯返回，弱网下必然超时。
   // 首屏只取 80 条，剩下的走"加载更多"，分片已有缓存，后续反而更快。
   const SEARCH_FIRST_PAGE = 40;
-const CLIENT_VERSION = "20261020-dirfix-1";
+const CLIENT_VERSION = "20261022-extfix-1";
   const SITE_SUBTITLE = "网课课程目录搜索";
   // 站点默认标题（initialize 里会根据 bootstrap 数据再确认一次）。
   // 与 serveStatic / Netlify Edge Function 注入的分享标题保持一致。
@@ -398,14 +398,31 @@ function getIndexedParentFolderPath(record) {
       .replace(/[^\p{L}\p{N}]+/gu, "");
   }
 
+  // 文件扩展名白名单：建索引时已把文件名里的扩展名剥掉（仅去索引、显示仍保留），
+  // 所以用户若带着 .mp4 等后缀搜索，会被切成 "xxx"+"mp4" 两个词，而 "mp4" 对应的
+  // 二元组在索引里已不存在，导致整次检索落空（表现为"搜文件没内容"）。
+  // 这里在查询侧把扩展名 token 一并剥掉，让 "xxx.mp4" 与索引里的 "xxx" 对齐。
+  const EXT = new Set([
+    'mp4','mkv','avi','mov','wmv','flv','m4v','mpg','mpeg','webm','3gp','ts','m2ts',
+    'vob','rm','rmvb','mp3','wav','flac','aac','ogg','oga','m4a','wma','ape','opus',
+    'pdf','doc','docx','xls','xlsx','ppt','pptx','txt','rtf','md','csv','epub','mobi',
+    'azw','wps','et','dps','pps','pot','key','numbers','pages','log','ini','cfg','yaml',
+    'yml','toml','lock','jpg','jpeg','png','gif','bmp','tif','tiff','webp','svg','ico',
+    'heic','heif','zip','rar','7z','tar','gz','bz2','xz','iso','dmg','tgz','z','lz',
+    'js','ts','json','xml','html','htm','css','py','java','c','cpp','h','hpp','sh',
+    'bat','ps1','exe','dll','so','dylib','apk','ipa','bin','dat','db','sqlite','sql',
+    'ttf','otf','woff','woff2','eot','psd','ai','eps','indd','cdr','dwg','dxf','blend',
+    'obj','fbx','stl','skp','swf','fla','as','swc','ics','vcf','torrent','img'
+  ]);
   function searchNeedles(value) {
     const text = String(value || "").normalize("NFKC").toLowerCase();
-    const whole = normalize(text);
     const parts = text
       .split(/[^\p{L}\p{N}]+/gu)
       .map(normalize)
       .filter(Boolean);
-    const needles = parts.length > 1 ? parts : [whole];
+    // 去掉被索引剥离的扩展名 token，使带后缀的文件名搜索也能命中精简索引
+    const filtered = parts.filter((p) => !EXT.has(p));
+    const needles = filtered.length ? filtered : parts;
     return Array.from(new Set(needles)).filter(Boolean);
   }
 
