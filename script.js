@@ -9,7 +9,7 @@
   // 扫完（例如「幼教」要拉 156 个分片 / 4.2MB）才肯返回，弱网下必然超时。
   // 首屏只取 80 条，剩下的走"加载更多"，分片已有缓存，后续反而更快。
   const SEARCH_FIRST_PAGE = 40;
-const CLIENT_VERSION = "20261022-extfix-1";
+const CLIENT_VERSION = "20261022-folderfix-1";
   const SITE_SUBTITLE = "网课课程目录搜索";
   // 站点默认标题（initialize 里会根据 bootstrap 数据再确认一次）。
   // 与 serveStatic / Netlify Edge Function 注入的分享标题保持一致。
@@ -1036,8 +1036,10 @@ function getIndexedParentFolderPath(record) {
     const needle = normalize(state.query);
     const needles = searchNeedles(state.query);
     const filtered = source.filter((record) => {
-      if (state.type === "dir" && !isFolderRecord(record)) return false;
-      if (state.type === "file" && isFolderRecord(record)) return false;
+      // 类型筛选（文件夹/文件）是搜索维度的概念，目录浏览视图没有类型切换 UI，
+      // 故仅在搜索态生效；否则会卡在 "dir" 把纯文件目录（如课程视频目录）整屏过滤成空。
+      if (state.searching && state.type === "dir" && !isFolderRecord(record)) return false;
+      if (state.searching && state.type === "file" && isFolderRecord(record)) return false;
       if (!state.searching || !needle) return true;
       return textMatchesNeedles(getSearchableText(record), needles);
     });
