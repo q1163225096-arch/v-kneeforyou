@@ -520,6 +520,41 @@ button.crumb-search:hover {
   font-weight: 500;
 }
 
+/* 搜索列表底部的「继续搜索文件内容」入口：从“仅文件夹”一键下钻到“仅文件”，
+   把同一个关键词搜到文件夹里面的视频/资料。 */
+.search-content-cta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: 100%;
+  margin: 14px 0 4px;
+  padding: 10px 12px;
+  border: 1px dashed #b9c2ef;
+  border-radius: 10px;
+  background: #f7f8ff;
+  color: #4a57d6;
+  font-size: 14px;
+  line-height: 1.3;
+  text-align: center;
+  cursor: pointer;
+}
+
+.search-content-cta:hover {
+  border-color: #4a57d6;
+  background: #eef1ff;
+}
+
+.search-content-cta-main {
+  font-weight: 600;
+}
+
+.search-content-cta-sub {
+  font-size: 12px;
+  font-weight: 400;
+  color: #8a91b6;
+}
+
 /* 目录分页条：首页/上一页 + 页码下拉 + 下一页/末页，下面再给一个输入框直接跳。
    页码下拉是主力交互，按钮只是兜底，手机上一次点击就能到位。
    窄屏放不下 5 个控件，所以整体允许换行，控件自身不许被压扁。 */

@@ -9,7 +9,7 @@
   // 扫完（例如「幼教」要拉 156 个分片 / 4.2MB）才肯返回，弱网下必然超时。
   // 首屏只取 80 条，剩下的走"加载更多"，分片已有缓存，后续反而更快。
   const SEARCH_FIRST_PAGE = 40;
-const CLIENT_VERSION = "20261022-folderfix-1";
+const CLIENT_VERSION = "20261022-contentcta-1";
   const SITE_SUBTITLE = "网课课程目录搜索";
   // 站点默认标题（initialize 里会根据 bootstrap 数据再确认一次）。
   // 与 serveStatic / Netlify Edge Function 注入的分享标题保持一致。
@@ -1909,7 +1909,16 @@ function getIndexedParentFolderPath(record) {
     const fallbackBanner = state.searching && state.searchFallback
       ? '<div class="search-fallback-hint">未找到名为“' + escapeHtml(state.query) + '”的文件夹，已为你搜索文件内容</div>'
       : "";
-    elements.list.innerHTML = fallbackBanner + rows + pager + moreRow;
+    // 「仅文件夹」搜到一堆同名文件夹后，用户真正想要的往往是文件夹里的视频/文件。
+    // 这里在列表底部给一个一键下钻的口子：同一关键词切到「仅文件」再搜一次，搜文件夹内的内容。
+    const onlyFolderResults = records.length > 0 && records.every((record) => isFolderRecord(record));
+    const contentSearchCta = state.searching && state.query && state.type === "dir" && onlyFolderResults
+      ? `<button class="search-content-cta" type="button" data-action="search-content">
+           <span class="search-content-cta-main">继续搜索「${escapeHtml(state.query)}」的文件内容</span>
+           <span class="search-content-cta-sub">文件夹名里没看到？点这里搜文件夹里面的文件 →</span>
+         </button>`
+      : "";
+    elements.list.innerHTML = fallbackBanner + rows + contentSearchCta + pager + moreRow;
   }
 
   function render() {
@@ -2039,6 +2048,16 @@ function getIndexedParentFolderPath(record) {
     saveHistoryState(false);
   });
 
+  // 代码里改了 state.type/scope（比如「继续搜索文件内容」自动切到「仅文件」）时，
+  // 把筛选栏的高亮同步过来，避免状态和 UI 对不上。
+  function syncFilterButtons() {
+    elements.filters.querySelectorAll("[data-filter]").forEach((button) => {
+      const filter = button.dataset.filter;
+      const value = String(state[filter] == null ? "" : state[filter]);
+      button.classList.toggle("is-active", value === button.dataset.value);
+    });
+  }
+
   elements.breadcrumb.addEventListener("click", (event) => {
     const backToSearch = event.target.closest("[data-action='back-to-search']");
     if (backToSearch) {
@@ -2098,6 +2117,22 @@ function getIndexedParentFolderPath(record) {
     const loadMoreButton = event.target.closest("[data-action='load-more']");
     if (loadMoreButton) {
       await loadMore();
+      return;
+    }
+
+    // 「继续搜索文件内容」：同一关键词从「仅文件夹」切到「仅文件」重搜，
+    // 直接列出文件夹里面的文件（视频/资料），不用再手动改筛选条件。
+    const contentSearchButton = event.target.closest("[data-action='search-content']");
+    if (contentSearchButton) {
+      state.type = "file";
+      state.searchFallback = false;
+      state.searchPage = 1;
+      state.directoryPage = 1;
+      syncFilterButtons();
+      saveHistoryState(false);
+      await runSearch(1, false);
+      restoreScrollTop(0);
+      saveHistoryState(true);
       return;
     }
 
