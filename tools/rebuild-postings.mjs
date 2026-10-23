@@ -14,7 +14,7 @@ const inDir = path.join(root, 'data/fast-search');
 const outDir = path.join(root, 'data/fast-search.new');
 fs.mkdirSync(outDir, { recursive: true });
 
-const NEW_VERSION = '20261021-extstrip-1';
+const NEW_VERSION = '20261023-platformtags-1';
 
 // ---- display-name substitutions (same as build-fast-search.js) ----
 const source = fs.readFileSync(path.join(root, 'script.js'), 'utf8');
@@ -25,6 +25,14 @@ const pattern = new RegExp(replacements.map(p => p.join('')).join('|'), 'gi');
 
 const normalize = s =>
   String(s || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+
+// ---- platform bracket tags (【小鹅】[千聊] …) ----
+// These source markers are noise: they are stripped from the indexed name so no
+// posting is emitted for them (display names in r* blocks are left untouched).
+// The same list is used on the query/match side (script.js / search-worker.js).
+const PLATFORM_TAGS = ['小鹅','目录','B站','CCtalk','学浪','小额','海豚','易知','人人讲','ClassIn','创客','荔枝','短书','海豚知道','伯索云','千聊','钉钉','问到','头条','易知课堂','优课','有赞'];
+const BRACKET_TAG_RE = new RegExp('[【\\[]\\s*(?:' + PLATFORM_TAGS.slice().sort((a,b)=>b.length-a.length).map(t=>t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|') + ')\\s*[】\\]]','gi');
+const stripBracketTags = s => String(s || '').replace(BRACKET_TAG_RE, '');
 
 // ---- extension whitelist (common media / doc / archive / image / code) ----
 const EXT = new Set([
@@ -77,7 +85,7 @@ for (const f of blocks) {
     const local = item[5] === 'local-self-use';
     const raw = remote ? (item[1] || '') : item[0];
     const base = local ? raw : String(raw).replace(pattern, 'kneeforyou');
-    const name = normalize(stripExt(base));
+    const name = normalize(stripExt(stripBracketTags(base)));
 
     if (EXCLUDE.has(name)) {
       // assign docId (keep alignment) but emit nothing -> never searchable

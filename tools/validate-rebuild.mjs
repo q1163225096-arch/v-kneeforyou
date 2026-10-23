@@ -7,8 +7,9 @@ import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const OLD = path.join(root, 'data/fast-search.bak');
-const NEW = path.join(root, 'data/fast-search.new');
+// 默认比 .bak，可用环境变量指向任意两份索引做对比（例如隔离单次改动的影响）
+const OLD = process.env.OLD_DIR ? path.resolve(root, process.env.OLD_DIR) : path.join(root, 'data/fast-search.bak');
+const NEW = process.env.NEW_DIR ? path.resolve(root, process.env.NEW_DIR) : path.join(root, 'data/fast-search.new');
 const shardCount = 2048;
 
 function hash(s) {
@@ -18,6 +19,10 @@ function hash(s) {
 }
 const normalize = s =>
   String(s || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+// 与 rebuild-postings.mjs 一致：平台方括号标签不进索引
+const PLATFORM_TAGS = ['小鹅','目录','B站','CCtalk','学浪','小额','海豚','易知','人人讲','ClassIn','创客','荔枝','短书','海豚知道','伯索云','千聊','钉钉','问到','头条','易知课堂','优课','有赞'];
+const BRACKET_TAG_RE = new RegExp('[【\\[]\\s*(?:' + PLATFORM_TAGS.slice().sort((a,b)=>b.length-a.length).map(t=>t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|') + ')\\s*[】\\]]','gi');
+const stripBracketTags = s => String(s || '').replace(BRACKET_TAG_RE, '');
 
 const shardCache = new Map();
 function loadShard(dir, token) {
@@ -51,7 +56,7 @@ function intersect(a, b) {
 }
 // returns number of candidate docIds (intersection across query tokens), or null if fallback
 function search(dir, query) {
-  const needles = query.split(/\s+/).filter(Boolean).map(normalize);
+  const needles = query.split(/\s+/).filter(Boolean).map(q => normalize(stripBracketTags(q)));
   const grams = new Set(), chars = new Set();
   for (const n of needles) {
     const list = Array.from(n);
@@ -97,7 +102,7 @@ console.log('OLD MB:', (oldSz / 1e6).toFixed(1), ' NEW MB:', (newSz / 1e6).toFix
   ' reduction:', (100 * (1 - newSz / oldSz)).toFixed(1) + '%');
 
 console.log('\n=== candidate docId counts per query (OLD -> NEW) ===');
-const queries = ['中神通', '幼教', 'cad', '数控', 'lecture.mp4', '资料', '课程', 'mp4'];
+const queries = ['中神通', '幼教', 'cad', '数控', 'lecture.mp4', '资料', '课程', 'mp4', '小鹅', '千聊'];
 for (const q of queries) {
   const o = search(OLD, q);
   const n = search(NEW, q);

@@ -9,7 +9,7 @@
   // 扫完（例如「幼教」要拉 156 个分片 / 4.2MB）才肯返回，弱网下必然超时。
   // 首屏只取 80 条，剩下的走"加载更多"，分片已有缓存，后续反而更快。
   const SEARCH_FIRST_PAGE = 40;
-const CLIENT_VERSION = "20261022-contentcta-1";
+const CLIENT_VERSION = "20261023-platformtags-1";
   const SITE_SUBTITLE = "网课课程目录搜索";
   // 站点默认标题（initialize 里会根据 bootstrap 数据再确认一次）。
   // 与 serveStatic / Netlify Edge Function 注入的分享标题保持一致。
@@ -23,7 +23,7 @@ const CLIENT_VERSION = "20261022-contentcta-1";
   // 都会让 worker 的 Cache Storage 桶名变化、旧桶被删除 —— 用户已缓存的上百个分片全部作废，
   // 每次升级都要重新冷启动下载 ~100 个分片 / ~4MB，弱网下就是「搜索很慢 + 一直失败」。
   // 现在固定住这个值：值沿用当前线上用户缓存里已有的版本，老用户缓存可直接续用，零额外冷启动。
-  const FAST_SEARCH_INDEX_VERSION = "20261021-extstrip-1";
+  const FAST_SEARCH_INDEX_VERSION = "20261023-platformtags-1";
   const SEARCH_MANIFEST_URL = `${assetUrl("data/search-manifest.json")}?v=${SEARCH_INDEX_VERSION}`;
   const SEARCH_CHUNKS_PER_PAGE = 10;
   const SEARCH_INITIAL_TIME_BUDGET_MS = 8000;
@@ -398,6 +398,27 @@ function getIndexedParentFolderPath(record) {
       .replace(/[^\p{L}\p{N}]+/gu, "");
   }
 
+  // 平台方括号标签（【小鹅】[千聊] 这类来源标记）不进索引、也不参与匹配。
+  // 建索引与查询两侧复用同一份词表与同一个剔除函数，保证「搜不到」与「不进索引」一致。
+  const PLATFORM_TAGS = [
+    "小鹅", "目录", "B站", "CCtalk", "学浪", "小额", "海豚", "易知", "人人讲",
+    "ClassIn", "创客", "荔枝", "短书", "海豚知道", "伯索云", "千聊", "钉钉",
+    "问到", "头条", "易知课堂", "优课", "有赞"
+  ];
+  const BRACKET_TAG_RE = new RegExp(
+    "[【\\[]\\s*(?:" +
+      PLATFORM_TAGS
+        .slice()
+        .sort((a, b) => b.length - a.length)
+        .map((tag) => tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+        .join("|") +
+      ")\\s*[】\\]]",
+    "gi"
+  );
+  function stripBracketTags(value) {
+    return String(value || "").replace(BRACKET_TAG_RE, "");
+  }
+
   // 文件扩展名白名单：建索引时已把文件名里的扩展名剥掉（仅去索引、显示仍保留），
   // 所以用户若带着 .mp4 等后缀搜索，会被切成 "xxx"+"mp4" 两个词，而 "mp4" 对应的
   // 二元组在索引里已不存在，导致整次检索落空（表现为"搜文件没内容"）。
@@ -415,7 +436,7 @@ function getIndexedParentFolderPath(record) {
     'obj','fbx','stl','skp','swf','fla','as','swc','ics','vcf','torrent','img'
   ]);
   function searchNeedles(value) {
-    const text = String(value || "").normalize("NFKC").toLowerCase();
+    const text = stripBracketTags(String(value || "")).normalize("NFKC").toLowerCase();
     const parts = text
       .split(/[^\p{L}\p{N}]+/gu)
       .map(normalize)
@@ -428,7 +449,7 @@ function getIndexedParentFolderPath(record) {
 
   function textMatchesNeedles(text, needles) {
     if (!needles.length) return true;
-    const haystack = normalize(text);
+    const haystack = normalize(stripBracketTags(text));
     return needles.every((needle) => haystack.includes(needle));
   }
 
@@ -1610,6 +1631,16 @@ function getIndexedParentFolderPath(record) {
     if (!state.query) {
       clearTimeout(deadline);
       state.searchResults = null;
+      return;
+    }
+    // 查询只剩平台标签（例如只搜「【小鹅】」）时，剔除后没有任何关键词可用；
+    // 若照常检索会因 needles 为空而命中全库，这里直接判为无结果。
+    if (!searchNeedles(state.query).length) {
+      clearTimeout(deadline);
+      state.searchResults = [];
+      state.searchMore = false;
+      state.loading = false;
+      render();
       return;
     }
 

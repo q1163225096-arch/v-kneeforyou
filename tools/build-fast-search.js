@@ -11,6 +11,11 @@ const source = fs.readFileSync(path.join(root,'script.js'),'utf8');
 const replacements = vm.runInNewContext(source.match(/const replacementParts = (\[[\s\S]*?\n  \]);/)[1]);
 const pattern = new RegExp(replacements.map(p=>p.join('')).join('|'),'gi');
 const normalize = s => String(s||'').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,'');
+// 平台方括号标签（【小鹅】[千聊]…）不进索引：token 化前从名字里剔除。
+// 与 rebuild-postings.mjs / script.js / search-worker.js 共用同一份词表。
+const PLATFORM_TAGS = ['小鹅','目录','B站','CCtalk','学浪','小额','海豚','易知','人人讲','ClassIn','创客','荔枝','短书','海豚知道','伯索云','千聊','钉钉','问到','头条','易知课堂','优课','有赞'];
+const BRACKET_TAG_RE = new RegExp('[【\\[]\\s*(?:' + PLATFORM_TAGS.slice().sort((a,b)=>b.length-a.length).map(t=>t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|') + ')\\s*[】\\]]','gi');
+const stripBracketTags = s => String(s||'').replace(BRACKET_TAG_RE,'');
 
 // ===== Duplicate-folder suppression =====
 // Folders with the same (or >=90% similar) normalized name under the SAME parent
@@ -112,7 +117,7 @@ for (let ci=0;ci<manifest.chunks.length;ci++) {
     // 导致它单行 token 数是别人的 3 倍（91 vs 32），索引膨胀且结果噪音大。
     // 目录本身同样会被索引，靠目录名一样能搜到，所以这里与其它分区对齐。
     const raw = remote ? item[1]||'' : item[0];
-    const name = normalize(local?raw:String(raw).replace(pattern,'kneeforyou'));
+    const name = normalize(stripBracketTags(local?raw:String(raw).replace(pattern,'kneeforyou')));
     const chars = Array.from(name);
     const tokens = new Set(chars.map(c=>'c'+c));
     for(let i=0;i+1<chars.length;i++) tokens.add('b'+chars[i]+chars[i+1]);

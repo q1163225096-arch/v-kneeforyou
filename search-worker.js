@@ -52,6 +52,11 @@ const CACHE_LIMIT = 320;
 // 是弱网（4G 三格）下可接受的上限；再多就会撞上 SEARCH_TIMEOUT 变成"搜不出来"。
 const MAX_ROW_FETCHES = 160;
 const normalize = value => String(value || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+// 平台方括号标签（【小鹅】[千聊] 这类来源标记）建索引时已被剔除，
+// 匹配侧必须用同一份词表剔除，否则搜「小鹅」会靠单字兜底仍然命中。
+const PLATFORM_TAGS = ['小鹅','目录','B站','CCtalk','学浪','小额','海豚','易知','人人讲','ClassIn','创客','荔枝','短书','海豚知道','伯索云','千聊','钉钉','问到','头条','易知课堂','优课','有赞'];
+const BRACKET_TAG_RE = new RegExp('[【\\[]\\s*(?:' + PLATFORM_TAGS.slice().sort((a,b)=>b.length-a.length).map(t=>t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|') + ')\\s*[】\\]]','gi');
+const stripBracketTags = value => String(value || '').replace(BRACKET_TAG_RE, '');
 function hash(value) { let n=2166136261; for(let i=0;i<value.length;i++) n=Math.imul(n^value.charCodeAt(i),16777619); return n>>>0; }
 // ---- 持久化缓存：搜过的分片落到浏览器 Cache Storage，下次直接本地读 ----
 let store = null;
@@ -137,7 +142,7 @@ function intersect(a,b) {
 }
 function itemText(item) {
   const raw=item[0]===1 ? `${item[1]||''} ${item[2]||''}` : item[0];
-  return normalize(item[5]==='local-self-use' ? raw : String(raw).replace(replacement,'kneeforyou'));
+  return normalize(stripBracketTags(item[5]==='local-self-use' ? raw : String(raw).replace(replacement,'kneeforyou')));
 }
 function isFolderRow(item) {
   return item[0]===1 ? Boolean(item[6]) : Boolean(item[2]);
@@ -235,7 +240,7 @@ async function search(message, job) {
     const item=batches[g][docId%metadata.rowSize];
     if(isExcludedFolder(item)) continue;
     const text=itemText(item);
-    if(!all&&!needles.every(needle=>text.includes(needle))) continue;
+    if(!all&&(!needles.length||!needles.every(needle=>text.includes(needle)))) continue;
     const key=item[0]===1?`d:${item[5]}:${item[2]}:${item[4]}`:`y:${item[5]}:${item[1]}`;
     if(seen.has(key)) continue;
     seen.add(key);
