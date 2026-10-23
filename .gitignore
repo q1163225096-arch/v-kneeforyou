@@ -4,3 +4,7 @@ work/
 node_modules/
 .DS_Store
 Thumbs.db
+
+# 索引回滚备份（体积大，勿提交；回滚请用 git 历史）
+data/fast-search.bak/
+data/fast-search.prev*/
