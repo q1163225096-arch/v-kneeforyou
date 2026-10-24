@@ -4,7 +4,7 @@ import { spawn } from "child_process";
 import http from "http";
 
 const EDGE = "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe";
-const PORT = 9224;
+const PORT = Number(process.env.CDP_PORT || 9224);
 const TARGET_URL = process.env.TEST_URL || "http://127.0.0.1:8771/";
 const QUERIES = (process.env.QUERIES || "小鹅|【小鹅】|中神通").split("|").filter(Boolean);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -42,7 +42,10 @@ async function waitFor(cond, tries = 80, gap = 300) {
 }
 
 async function search(kw) {
-  await evaluate(`(async()=>{const b=document.querySelector('.radio-button[data-value="all"]'); if(b) b.click(); return true;})()`);
+  // 默认先切到「仅文件夹」模式，复现用户的真实默认态；
+  // 设 MODE=all 则切到「全部类型」
+  const mode = process.env.MODE || "dir";
+  await evaluate(`(async()=>{const b=document.querySelector(".radio-button[data-value='${mode}']"); if(b) b.click(); return true;})()`);
   await sleep(250);
   await evaluate(`(async()=>{
     const input=document.getElementById('searchInput'); input.value=${JSON.stringify(kw)};

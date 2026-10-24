@@ -9,7 +9,7 @@
   // 扫完（例如「幼教」要拉 156 个分片 / 4.2MB）才肯返回，弱网下必然超时。
   // 首屏只取 80 条，剩下的走"加载更多"，分片已有缓存，后续反而更快。
   const SEARCH_FIRST_PAGE = 40;
-const CLIENT_VERSION = "20261024-noisestrip-2";
+const CLIENT_VERSION = "20261024-dirfallback-1";
   const SITE_SUBTITLE = "网课课程目录搜索";
   // 站点默认标题（initialize 里会根据 bootstrap 数据再确认一次）。
   // 与 serveStatic / Netlify Edge Function 注入的分享标题保持一致。
@@ -48,6 +48,10 @@ const CLIENT_VERSION = "20261024-noisestrip-2";
     directoryPage: 1,
     renderedRecords: [],
     savedSearch: null,
+    // 已经为哪个关键词跑过「文件夹→文件」自动兜底。
+    // 兜底只对每个关键词生效一次：用户手动切过类型之后要尊重他的选择，
+    // 不能再自动跳回「全部类型」，否则筛选按钮看起来像坏了。
+    fallbackQuery: "",
   };
 
   const elements = {
@@ -1647,8 +1651,11 @@ function getIndexedParentFolderPath(record) {
     }
   }
 
-  async function runSearch(page, append) {
-    const generation = ++searchGeneration;
+  // sameGeneration=true 用于「仅文件夹」搜不到时的内部兜底重搜：
+  // 兜底是同一次用户搜索的延续，不能 bump generation，否则外层调用回来后
+  // 会发现 generation 对不上而跳过收尾（类型还原/高亮同步），状态就烂在半路。
+  async function runSearch(page, append, sameGeneration) {
+    const generation = sameGeneration ? searchGeneration : ++searchGeneration;
     cancelSearch();
     const legacyController = new AbortController();
     legacySearchController = legacyController;
@@ -1706,19 +1713,33 @@ function getIndexedParentFolderPath(record) {
         state.searchPage = page;
         // 默认先搜文件夹；全盘都搜不到同名文件夹时，自动兜底去搜文件内容，
         // 避免用户以为"搜不到"。兜底结果会在结果区顶部给出提示。
-        if (state.type === "dir" && result.data.length === 0 && !state.searchFallback) {
+        // 每个关键词只兜底一次（fallbackQuery）：用户手动切过类型后就尊重他的选择。
+        if (state.type === "dir" && result.data.length === 0 && !state.searchFallback && state.fallbackQuery !== state.query) {
           state.searchFallback = true;
-          const prevType = state.type;
+          state.fallbackQuery = state.query;
           state.type = "all";
           try {
-            await runSearch(page, false);
-            return;
+            await runSearch(page, false, true);
           } catch (e) {
-            // 兜底也失败则保留空结果，由 emptyStateText 说明
-          } finally {
-            state.type = prevType;
+            // runSearch 内部已兜住大部分错误；真抛出来按"兜底失败"处理
           }
-          state.searchFallback = false;
+          if (generation !== searchGeneration) return;
+          // 注意：这里不能再把 state.type 还原成 "dir"（曾经的写法）。
+          // visibleRecords() 会按 state.type 过滤记录，还原成 "dir" 会把兜底刚搜出来
+          // 的文件全部过滤掉——用户看到的就是"明明有文件却显示搜不到"（如「思捷」「瑜伽术」）。
+          if (Array.isArray(state.searchResults) && state.searchResults.length) {
+            // 兜底搜到了文件：类型留在 "all" 让文件正常展示，筛选栏高亮同步过来。
+            state.type = "all";
+            state.searchFallback = true;
+            syncFilterControls();
+            render();
+          } else {
+            // 兜底也没搜到：类型回到 "dir"，但保留 searchFallback，
+            // 空态文案说明"文件夹和文件内容里都没有"（别再让用户手动切「全部类型」白试一遍）。
+            state.type = "dir";
+            state.searchFallback = true;
+          }
+          return;
         }
         state.searchFallback = false;
         refreshCacheHint();
@@ -2029,6 +2050,8 @@ function getIndexedParentFolderPath(record) {
     state.searching = Boolean(query);
     state.searchResults = null;
     state.searchFallback = false;
+    // 新关键词重新获得一次自动兜底的机会
+    state.fallbackQuery = "";
     state.searchMore = false;
     state.searchPage = 1;
     if (state.searching) {
@@ -2089,6 +2112,9 @@ function getIndexedParentFolderPath(record) {
     const value = button.dataset.value;
     state[filter] = value;
     state.directoryPage = 1;
+    // 手动切筛选条件意味着一次全新的搜索，清掉上一次的兜底标记，
+    // 否则加载中的那一瞬还会挂着上次的"已为你搜索文件内容"横幅。
+    state.searchFallback = false;
     elements.filters
       .querySelectorAll(`[data-filter="${filter}"]`)
       .forEach((item) => item.classList.toggle("is-active", item === button));
