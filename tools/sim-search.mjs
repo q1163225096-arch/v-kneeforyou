@@ -183,3 +183,9 @@ for (const q of ['中神通','幼教','cad','课程','资料']) {
   const r = runSearch(q, 'dir');
   console.log(`  ${q}: folders=${r.folders} files=${r.files} (候选${r.total})`);
 }
+
+console.log('\n=== 本次增量新增内容验证（20261024-selfuse-inc-1）===');
+for (const q of ['库课网校','一口冬瓜','机械','电气','高顿','阿虎医考']) {
+  const r = runSearch(q, 'all');
+  console.log(`  ${q}: folders=${r.folders} files=${r.files} (候选${r.total})`);
+}
