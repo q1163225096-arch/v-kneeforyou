@@ -52,11 +52,30 @@ const CACHE_LIMIT = 320;
 // 是弱网（4G 三格）下可接受的上限；再多就会撞上 SEARCH_TIMEOUT 变成"搜不出来"。
 const MAX_ROW_FETCHES = 160;
 const normalize = value => String(value || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
-// 平台方括号标签（【小鹅】[千聊] 这类来源标记）建索引时已被剔除，
-// 匹配侧必须用同一份词表剔除，否则搜「小鹅」会靠单字兜底仍然命中。
+// 索引噪音剔除：与 rebuild-postings.mjs / script.js 共用同一套规则。
+// 只改索引不改这里会失效——bigram 缺失后退回单字兜底，再用原始名 includes 仍会命中。
 const PLATFORM_TAGS = ['小鹅','目录','B站','CCtalk','学浪','小额','海豚','易知','人人讲','ClassIn','创客','荔枝','短书','海豚知道','伯索云','千聊','钉钉','问到','头条','易知课堂','优课','有赞'];
 const BRACKET_TAG_RE = new RegExp('[【\\[]\\s*(?:' + PLATFORM_TAGS.slice().sort((a,b)=>b.length-a.length).map(t=>t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|') + ')\\s*[】\\]]','gi');
-const stripBracketTags = value => String(value || '').replace(BRACKET_TAG_RE, '');
+const NOISE_WORD_RE = /课件|资料/g;
+const BRACE_NUM_RE = /\{\s*[0-9]+\s*\}/g;
+const HASH_NUM_RE = /#[0-9]+#/g;
+const BRACKET_NUM_RE = /\[\s*[0-9]+\s*\]/g;
+const EMPTY_BRACKET_RE = /[【\[][】\]]/g;
+const LEADING_NUM_RE = /^\s*[0-9]+\s*[-_.、,，:：)\]']\s*/;
+function stripIndexNoise(value) {
+  let text = String(value == null ? '' : value)
+    .replace(BRACKET_TAG_RE, '')
+    .replace(NOISE_WORD_RE, '')
+    .replace(BRACE_NUM_RE, '')
+    .replace(HASH_NUM_RE, '')
+    .replace(BRACKET_NUM_RE, '').replace(EMPTY_BRACKET_RE, '');
+  for (let i = 0; i < 5; i++) {
+    const next = text.replace(LEADING_NUM_RE, '');
+    if (next === text) break;
+    text = next;
+  }
+  return text;
+}
 function hash(value) { let n=2166136261; for(let i=0;i<value.length;i++) n=Math.imul(n^value.charCodeAt(i),16777619); return n>>>0; }
 // ---- 持久化缓存：搜过的分片落到浏览器 Cache Storage，下次直接本地读 ----
 let store = null;
@@ -142,7 +161,7 @@ function intersect(a,b) {
 }
 function itemText(item) {
   const raw=item[0]===1 ? `${item[1]||''} ${item[2]||''}` : item[0];
-  return normalize(stripBracketTags(item[5]==='local-self-use' ? raw : String(raw).replace(replacement,'kneeforyou')));
+  return normalize(stripIndexNoise(item[5]==='local-self-use' ? raw : String(raw).replace(replacement,'kneeforyou')));
 }
 function isFolderRow(item) {
   return item[0]===1 ? Boolean(item[6]) : Boolean(item[2]);

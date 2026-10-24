@@ -19,10 +19,20 @@ const replacementParts = vm.runInNewContext(
 const replacement = new RegExp(replacementParts.map(p => p.join('')).join('|'), 'gi');
 
 const normalize = s => String(s || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
-// 与 rebuild-postings.mjs / search-worker.js 一致：平台方括号标签不进索引、不参与匹配
+// 与 rebuild-postings.mjs / search-worker.js 一致：索引噪音剔除（平台标签 + 课件/资料 + 累加编号）
 const PLATFORM_TAGS = ['小鹅','目录','B站','CCtalk','学浪','小额','海豚','易知','人人讲','ClassIn','创客','荔枝','短书','海豚知道','伯索云','千聊','钉钉','问到','头条','易知课堂','优课','有赞'];
 const BRACKET_TAG_RE = new RegExp('[【\\[]\\s*(?:' + PLATFORM_TAGS.slice().sort((a,b)=>b.length-a.length).map(t=>t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|') + ')\\s*[】\\]]','gi');
-const stripBracketTags = s => String(s || '').replace(BRACKET_TAG_RE, '');
+const NOISE_WORD_RE = /课件|资料/g;
+const BRACE_NUM_RE = /\{\s*[0-9]+\s*\}/g;
+const HASH_NUM_RE = /#[0-9]+#/g;
+const BRACKET_NUM_RE = /\[\s*[0-9]+\s*\]/g;
+const EMPTY_BRACKET_RE = /[【\[][】\]]/g;
+const LEADING_NUM_RE = /^\s*[0-9]+\s*[-_.、,，:：)\]']\s*/;
+function stripIndexNoise(s){
+  let text=String(s==null?'':s).replace(BRACKET_TAG_RE,'').replace(NOISE_WORD_RE,'').replace(BRACE_NUM_RE,'').replace(HASH_NUM_RE,'').replace(BRACKET_NUM_RE,'').replace(EMPTY_BRACKET_RE,'');
+  for(let i=0;i<5;i++){const next=text.replace(LEADING_NUM_RE,''); if(next===text)break; text=next;}
+  return text;
+}
 function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; }
 
 // directoryBits
@@ -43,7 +53,7 @@ const rawName = item => item[0] === 1 ? item[1] : item[0];
 const isFolderRow = item => item[0] === 1 ? Boolean(item[6]) : Boolean(item[2]);
 function itemText(item) {
   const raw = item[0] === 1 ? `${item[1]||''} ${item[2]||''}` : item[0];
-  return normalize(stripBracketTags(item[5] === 'local-self-use' ? raw : String(raw).replace(replacement, 'kneeforyou')));
+  return normalize(stripIndexNoise(item[5] === 'local-self-use' ? raw : String(raw).replace(replacement, 'kneeforyou')));
 }
 
 const shardCache = new Map();
@@ -115,7 +125,7 @@ const EXT = new Set([
 ]);
 // 修复版：去掉被索引剥离的扩展名 token（与建索引逻辑对齐）
 function searchNeedles(value) {
-  const text = stripBracketTags(String(value || '')).normalize('NFKC').toLowerCase();
+  const text = stripIndexNoise(String(value || '')).normalize('NFKC').toLowerCase();
   const parts = text.split(/[^\p{L}\p{N}]+/gu).map(normalize).filter(Boolean);
   const filtered = parts.filter(p => !EXT.has(p));
   const needles = filtered.length ? filtered : parts;

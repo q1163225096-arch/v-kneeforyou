@@ -14,7 +14,7 @@ const inDir = path.join(root, 'data/fast-search');
 const outDir = path.join(root, 'data/fast-search.new');
 fs.mkdirSync(outDir, { recursive: true });
 
-const NEW_VERSION = '20261023-platformtags-1';
+const NEW_VERSION = '20261024-noisestrip-2';
 
 // ---- display-name substitutions (same as build-fast-search.js) ----
 const source = fs.readFileSync(path.join(root, 'script.js'), 'utf8');
@@ -26,13 +26,32 @@ const pattern = new RegExp(replacements.map(p => p.join('')).join('|'), 'gi');
 const normalize = s =>
   String(s || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 
-// ---- platform bracket tags (【小鹅】[千聊] …) ----
-// These source markers are noise: they are stripped from the indexed name so no
-// posting is emitted for them (display names in r* blocks are left untouched).
-// The same list is used on the query/match side (script.js / search-worker.js).
+// ---- index noise stripping (【小鹅】[千聊] / 课件 / 资料 / {0} #1# [1] / 00_ 1 - …) ----
+// Stripped from the indexed name so no posting is emitted for them (display names
+// in r* blocks are left untouched). The SAME rules are applied on the match side
+// (search-worker.js) and the query side (script.js) so behaviour stays consistent.
 const PLATFORM_TAGS = ['小鹅','目录','B站','CCtalk','学浪','小额','海豚','易知','人人讲','ClassIn','创客','荔枝','短书','海豚知道','伯索云','千聊','钉钉','问到','头条','易知课堂','优课','有赞'];
 const BRACKET_TAG_RE = new RegExp('[【\\[]\\s*(?:' + PLATFORM_TAGS.slice().sort((a,b)=>b.length-a.length).map(t=>t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|') + ')\\s*[】\\]]','gi');
-const stripBracketTags = s => String(s || '').replace(BRACKET_TAG_RE, '');
+const NOISE_WORD_RE = /课件|资料/g;
+const BRACE_NUM_RE = /\{\s*[0-9]+\s*\}/g;
+const HASH_NUM_RE = /#[0-9]+#/g;
+const BRACKET_NUM_RE = /\[\s*[0-9]+\s*\]/g;
+const EMPTY_BRACKET_RE = /[【\[][】\]]/g;
+const LEADING_NUM_RE = /^\s*[0-9]+\s*[-_.、,，:：)\]']\s*/;
+function stripIndexNoise(s) {
+  let text = String(s == null ? '' : s)
+    .replace(BRACKET_TAG_RE, '')
+    .replace(NOISE_WORD_RE, '')
+    .replace(BRACE_NUM_RE, '')
+    .replace(HASH_NUM_RE, '')
+    .replace(BRACKET_NUM_RE, '').replace(EMPTY_BRACKET_RE, '');
+  for (let i = 0; i < 5; i++) {
+    const next = text.replace(LEADING_NUM_RE, '');
+    if (next === text) break;
+    text = next;
+  }
+  return text;
+}
 
 // ---- extension whitelist (common media / doc / archive / image / code) ----
 const EXT = new Set([
@@ -85,10 +104,15 @@ for (const f of blocks) {
     const local = item[5] === 'local-self-use';
     const raw = remote ? (item[1] || '') : item[0];
     const base = local ? raw : String(raw).replace(pattern, 'kneeforyou');
-    const name = normalize(stripExt(stripBracketTags(base)));
+    // 顺序很重要：必须先 stripExt 再 stripIndexNoise。
+    // 反过来会把「10_010.mp4」里的点号连同编号一起吃掉，剩下裸 "mp4"，
+    // 而 stripExt 只剥末尾带点的扩展名 → "mp4" 被当成普通词索引，凭空造出大量 bmp token。
+    const name = normalize(stripIndexNoise(stripExt(base)));
 
-    if (EXCLUDE.has(name)) {
-      // assign docId (keep alignment) but emit nothing -> never searchable
+    if (EXCLUDE.has(name) || !name) {
+      // assign docId (keep alignment) but emit nothing -> never searchable.
+      // !name：名字被剔空的（如整行只剩【资料】这类标签）同样不进索引，
+      // 也不计入 folder/file 统计，否则 folder 数会被空名行撑大。
       total++;
       excluded++;
       continue;

@@ -19,10 +19,20 @@ function hash(s) {
 }
 const normalize = s =>
   String(s || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
-// 与 rebuild-postings.mjs 一致：平台方括号标签不进索引
+// 与 rebuild-postings.mjs 一致：索引噪音剔除（平台标签 + 课件/资料 + 累加编号）
 const PLATFORM_TAGS = ['小鹅','目录','B站','CCtalk','学浪','小额','海豚','易知','人人讲','ClassIn','创客','荔枝','短书','海豚知道','伯索云','千聊','钉钉','问到','头条','易知课堂','优课','有赞'];
 const BRACKET_TAG_RE = new RegExp('[【\\[]\\s*(?:' + PLATFORM_TAGS.slice().sort((a,b)=>b.length-a.length).map(t=>t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|') + ')\\s*[】\\]]','gi');
-const stripBracketTags = s => String(s || '').replace(BRACKET_TAG_RE, '');
+const NOISE_WORD_RE = /课件|资料/g;
+const BRACE_NUM_RE = /\{\s*[0-9]+\s*\}/g;
+const HASH_NUM_RE = /#[0-9]+#/g;
+const BRACKET_NUM_RE = /\[\s*[0-9]+\s*\]/g;
+const EMPTY_BRACKET_RE = /[【\[][】\]]/g;
+const LEADING_NUM_RE = /^\s*[0-9]+\s*[-_.、,，:：)\]']\s*/;
+function stripIndexNoise(s){
+  let text=String(s==null?'':s).replace(BRACKET_TAG_RE,'').replace(NOISE_WORD_RE,'').replace(BRACE_NUM_RE,'').replace(HASH_NUM_RE,'').replace(BRACKET_NUM_RE,'').replace(EMPTY_BRACKET_RE,'');
+  for(let i=0;i<5;i++){const next=text.replace(LEADING_NUM_RE,''); if(next===text)break; text=next;}
+  return text;
+}
 
 const shardCache = new Map();
 function loadShard(dir, token) {
@@ -56,7 +66,8 @@ function intersect(a, b) {
 }
 // returns number of candidate docIds (intersection across query tokens), or null if fallback
 function search(dir, query) {
-  const needles = query.split(/\s+/).filter(Boolean).map(q => normalize(stripBracketTags(q)));
+  const needles = query.split(/\s+/).filter(Boolean).map(q => normalize(stripIndexNoise(q))).filter(Boolean);
+  if (!needles.length) return 0; // 查询被剔空（如只搜「资料」「课件」）=> 无 token => 0 结果
   const grams = new Set(), chars = new Set();
   for (const n of needles) {
     const list = Array.from(n);
@@ -102,7 +113,7 @@ console.log('OLD MB:', (oldSz / 1e6).toFixed(1), ' NEW MB:', (newSz / 1e6).toFix
   ' reduction:', (100 * (1 - newSz / oldSz)).toFixed(1) + '%');
 
 console.log('\n=== candidate docId counts per query (OLD -> NEW) ===');
-const queries = ['中神通', '幼教', 'cad', '数控', 'lecture.mp4', '资料', '课程', 'mp4', '小鹅', '千聊'];
+const queries = ['中神通', '幼教', 'cad', '数控', 'lecture.mp4', '资料', '课程', 'mp4', '小鹅', '千聊', '课件', '目录'];
 for (const q of queries) {
   const o = search(OLD, q);
   const n = search(NEW, q);

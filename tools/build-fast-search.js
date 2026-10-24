@@ -11,11 +11,23 @@ const source = fs.readFileSync(path.join(root,'script.js'),'utf8');
 const replacements = vm.runInNewContext(source.match(/const replacementParts = (\[[\s\S]*?\n  \]);/)[1]);
 const pattern = new RegExp(replacements.map(p=>p.join('')).join('|'),'gi');
 const normalize = s => String(s||'').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,'');
-// 平台方括号标签（【小鹅】[千聊]…）不进索引：token 化前从名字里剔除。
-// 与 rebuild-postings.mjs / script.js / search-worker.js 共用同一份词表。
+// 索引噪音剔除：平台方括号标签 + 通用噪音词(课件/资料) + 累加编号占位符。
+// 与 rebuild-postings.mjs / script.js / search-worker.js 共用同一套规则。
+// 注意：本脚本是「全量重建」用的旧路径，**没有** stripExt（扩展名剥离只在
+// rebuild-postings.mjs 里做）。要得到与线上一致的索引，请用 rebuild-postings.mjs。
 const PLATFORM_TAGS = ['小鹅','目录','B站','CCtalk','学浪','小额','海豚','易知','人人讲','ClassIn','创客','荔枝','短书','海豚知道','伯索云','千聊','钉钉','问到','头条','易知课堂','优课','有赞'];
 const BRACKET_TAG_RE = new RegExp('[【\\[]\\s*(?:' + PLATFORM_TAGS.slice().sort((a,b)=>b.length-a.length).map(t=>t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|') + ')\\s*[】\\]]','gi');
-const stripBracketTags = s => String(s||'').replace(BRACKET_TAG_RE,'');
+const NOISE_WORD_RE = /课件|资料/g;
+const BRACE_NUM_RE = /\{\s*[0-9]+\s*\}/g;
+const HASH_NUM_RE = /#[0-9]+#/g;
+const BRACKET_NUM_RE = /\[\s*[0-9]+\s*\]/g;
+const EMPTY_BRACKET_RE = /[【\[][】\]]/g;
+const LEADING_NUM_RE = /^\s*[0-9]+\s*[-_.、,，:：)\]']\s*/;
+function stripIndexNoise(s){
+  let text=String(s==null?'':s).replace(BRACKET_TAG_RE,'').replace(NOISE_WORD_RE,'').replace(BRACE_NUM_RE,'').replace(HASH_NUM_RE,'').replace(BRACKET_NUM_RE,'').replace(EMPTY_BRACKET_RE,'');
+  for(let i=0;i<5;i++){const next=text.replace(LEADING_NUM_RE,''); if(next===text)break; text=next;}
+  return text;
+}
 
 // ===== Duplicate-folder suppression =====
 // Folders with the same (or >=90% similar) normalized name under the SAME parent
@@ -117,7 +129,7 @@ for (let ci=0;ci<manifest.chunks.length;ci++) {
     // 导致它单行 token 数是别人的 3 倍（91 vs 32），索引膨胀且结果噪音大。
     // 目录本身同样会被索引，靠目录名一样能搜到，所以这里与其它分区对齐。
     const raw = remote ? item[1]||'' : item[0];
-    const name = normalize(stripBracketTags(local?raw:String(raw).replace(pattern,'kneeforyou')));
+    const name = normalize(stripIndexNoise(local?raw:String(raw).replace(pattern,'kneeforyou')));
     const chars = Array.from(name);
     const tokens = new Set(chars.map(c=>'c'+c));
     for(let i=0;i+1<chars.length;i++) tokens.add('b'+chars[i]+chars[i+1]);

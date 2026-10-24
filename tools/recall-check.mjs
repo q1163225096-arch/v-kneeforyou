@@ -22,10 +22,20 @@ const pattern = new RegExp(replacementParts.map(p => p.join('')).join('|'), 'gi'
 
 const normalize = s =>
   String(s || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
-// 与 rebuild-postings.mjs 一致：平台方括号标签不进索引
+// 与 rebuild-postings.mjs 一致：索引噪音剔除（平台标签 + 课件/资料 + 累加编号）
 const PLATFORM_TAGS = ['小鹅','目录','B站','CCtalk','学浪','小额','海豚','易知','人人讲','ClassIn','创客','荔枝','短书','海豚知道','伯索云','千聊','钉钉','问到','头条','易知课堂','优课','有赞'];
 const BRACKET_TAG_RE = new RegExp('[【\\[]\\s*(?:' + PLATFORM_TAGS.slice().sort((a,b)=>b.length-a.length).map(t=>t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|') + ')\\s*[】\\]]','gi');
-const stripBracketTags = s => String(s || '').replace(BRACKET_TAG_RE, '');
+const NOISE_WORD_RE = /课件|资料/g;
+const BRACE_NUM_RE = /\{\s*[0-9]+\s*\}/g;
+const HASH_NUM_RE = /#[0-9]+#/g;
+const BRACKET_NUM_RE = /\[\s*[0-9]+\s*\]/g;
+const EMPTY_BRACKET_RE = /[【\[][】\]]/g;
+const LEADING_NUM_RE = /^\s*[0-9]+\s*[-_.、,，:：)\]']\s*/;
+function stripIndexNoise(s){
+  let text=String(s==null?'':s).replace(BRACKET_TAG_RE,'').replace(NOISE_WORD_RE,'').replace(BRACE_NUM_RE,'').replace(HASH_NUM_RE,'').replace(BRACKET_NUM_RE,'').replace(EMPTY_BRACKET_RE,'');
+  for(let i=0;i<5;i++){const next=text.replace(LEADING_NUM_RE,''); if(next===text)break; text=next;}
+  return text;
+}
 function hash(s) {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
@@ -126,7 +136,7 @@ for (let i = 0; i < N; i++) {
   const rn = rawName(item);
   // 与构建脚本一致的混淆词替换 + 去扩展名 + 归一化，得到“索引里存储的形式”
   const replaced = (item[5] === 'local-self-use') ? rn : String(rn).replace(pattern, 'kneeforyou');
-  const indexedName = normalize(stripExt(stripBracketTags(replaced)));
+  const indexedName = normalize(stripIndexNoise(stripExt(replaced)));
   // 期望排除的（课程/资料 裸桶）
   if (EXCLUDED.has(indexedName)) { expectedFindable++; continue; }
   if (!indexedName) { emptyIndexed++; continue; } // 索引名为空，无法被任何词搜到

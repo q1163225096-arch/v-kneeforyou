@@ -9,7 +9,7 @@
   // 扫完（例如「幼教」要拉 156 个分片 / 4.2MB）才肯返回，弱网下必然超时。
   // 首屏只取 80 条，剩下的走"加载更多"，分片已有缓存，后续反而更快。
   const SEARCH_FIRST_PAGE = 40;
-const CLIENT_VERSION = "20261023-platformtags-1";
+const CLIENT_VERSION = "20261024-noisestrip-2";
   const SITE_SUBTITLE = "网课课程目录搜索";
   // 站点默认标题（initialize 里会根据 bootstrap 数据再确认一次）。
   // 与 serveStatic / Netlify Edge Function 注入的分享标题保持一致。
@@ -23,7 +23,7 @@ const CLIENT_VERSION = "20261023-platformtags-1";
   // 都会让 worker 的 Cache Storage 桶名变化、旧桶被删除 —— 用户已缓存的上百个分片全部作废，
   // 每次升级都要重新冷启动下载 ~100 个分片 / ~4MB，弱网下就是「搜索很慢 + 一直失败」。
   // 现在固定住这个值：值沿用当前线上用户缓存里已有的版本，老用户缓存可直接续用，零额外冷启动。
-  const FAST_SEARCH_INDEX_VERSION = "20261023-platformtags-1";
+  const FAST_SEARCH_INDEX_VERSION = "20261024-noisestrip-2";
   const SEARCH_MANIFEST_URL = `${assetUrl("data/search-manifest.json")}?v=${SEARCH_INDEX_VERSION}`;
   const SEARCH_CHUNKS_PER_PAGE = 10;
   const SEARCH_INITIAL_TIME_BUDGET_MS = 8000;
@@ -398,8 +398,12 @@ function getIndexedParentFolderPath(record) {
       .replace(/[^\p{L}\p{N}]+/gu, "");
   }
 
-  // 平台方括号标签（【小鹅】[千聊] 这类来源标记）不进索引、也不参与匹配。
-  // 建索引与查询两侧复用同一份词表与同一个剔除函数，保证「搜不到」与「不进索引」一致。
+  // ===== 索引噪音剔除：建索引侧与匹配侧共用同一套规则 =====
+  // 1) 平台方括号标签：【小鹅】[千聊] 等来源标记。只剔「方括号包裹」的，
+  //    避免误伤「小鹅通营销课」这类正常名字里的同名词。
+  // 2) 通用噪音词：课件、资料。任何位置出现都剔除，否则这两个词仍能被搜到
+  //    （数据里「资料」绝大多数是嵌在课名里的，如「电子资料班」）。
+  // 3) 累加编号/占位符：{0} {1} #1# [1] [2]，以及名字开头的 00_ 01_ 1 - 1. 027、 等。
   const PLATFORM_TAGS = [
     "小鹅", "目录", "B站", "CCtalk", "学浪", "小额", "海豚", "易知", "人人讲",
     "ClassIn", "创客", "荔枝", "短书", "海豚知道", "伯索云", "千聊", "钉钉",
@@ -415,8 +419,29 @@ function getIndexedParentFolderPath(record) {
       ")\\s*[】\\]]",
     "gi"
   );
-  function stripBracketTags(value) {
-    return String(value || "").replace(BRACKET_TAG_RE, "");
+  const NOISE_WORD_RE = /课件|资料/g; // 通用噪音词：任何位置都剔
+  const BRACE_NUM_RE = /\{\s*[0-9]+\s*\}/g; // {0} {1} {12}
+  const HASH_NUM_RE = /#[0-9]+#/g; // #1# #12#
+  const BRACKET_NUM_RE = /\[\s*[0-9]+\s*\]/g; // [1] [12]
+  const EMPTY_BRACKET_RE = /[【\[][】\]]/g; // 剔除后残留的空括号对（如【资料】→【】）
+  // 开头的累加编号：00_ 01_ 1_ 10_ 01. 1. 027、 1 - 等。
+  // 分隔符必填，避免误伤「3D建模」「7天入门」「10分钟瘦身」这类正常开头。
+  const LEADING_NUM_RE = /^\s*[0-9]+\s*[-_.、,，:：)\]']\s*/;
+  function stripIndexNoise(value) {
+    let text = String(value == null ? "" : value)
+      .replace(BRACKET_TAG_RE, "")
+      .replace(NOISE_WORD_RE, "")
+      .replace(BRACE_NUM_RE, "")
+      .replace(HASH_NUM_RE, "")
+      .replace(BRACKET_NUM_RE, "")
+      .replace(EMPTY_BRACKET_RE, "");
+    // 开头的编号可能叠着来（如 01_02_xxx），最多循环 5 次
+    for (let i = 0; i < 5; i++) {
+      const next = text.replace(LEADING_NUM_RE, "");
+      if (next === text) break;
+      text = next;
+    }
+    return text;
   }
 
   // 文件扩展名白名单：建索引时已把文件名里的扩展名剥掉（仅去索引、显示仍保留），
@@ -436,7 +461,7 @@ function getIndexedParentFolderPath(record) {
     'obj','fbx','stl','skp','swf','fla','as','swc','ics','vcf','torrent','img'
   ]);
   function searchNeedles(value) {
-    const text = stripBracketTags(String(value || "")).normalize("NFKC").toLowerCase();
+    const text = stripIndexNoise(String(value || "")).normalize("NFKC").toLowerCase();
     const parts = text
       .split(/[^\p{L}\p{N}]+/gu)
       .map(normalize)
@@ -449,7 +474,7 @@ function getIndexedParentFolderPath(record) {
 
   function textMatchesNeedles(text, needles) {
     if (!needles.length) return true;
-    const haystack = normalize(stripBracketTags(text));
+    const haystack = normalize(stripIndexNoise(text));
     return needles.every((needle) => haystack.includes(needle));
   }
 
