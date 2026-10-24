@@ -1,6 +1,6 @@
 // 等生产 CDN 生效后自动跑端到端验证
-// 轮询 index.html 直到 script.js?v=20261024-dirfallback-1 出现（最多 8 分钟），
-// 然后用无头 Edge 打生产 URL 验证「思捷」「瑜伽术」能出文件、「机械」「电气」正常。
+// 轮询 index.html 直到 script.js?v=<EXPECT_VERSION> 出现（最多 8 分钟），
+// 然后用无头 Edge 打生产 URL 验证新导入内容可搜、旧查询回归正常。
 import { spawn, execSync } from "child_process";
 import http from "http";
 
@@ -8,7 +8,8 @@ const PROD = "https://q1163225096-arch.github.io/v-kneeforyou/";
 const EDGE = "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe";
 const PORT = Number(process.env.CDP_PORT || 9350);
 const NODE = "C:/Users/Administrator/.workbuddy/binaries/node/versions/22.22.2-6/node.exe";
-const QUERIES = (process.env.QUERIES || "思捷|瑜伽术|机械|电气").split("|");
+const EXPECT_VERSION = process.env.EXPECT_VERSION || "20261024-selfuse-inc-1";
+const QUERIES = (process.env.QUERIES || "库课网校|一口冬瓜|高顿|机械|电气|瑜伽术").split("|");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function httpGet(p) {
@@ -24,7 +25,7 @@ async function waitForProd(maxMs = 8 * 60 * 1000) {
   while (Date.now() - start < maxMs) {
     try {
       const html = execSync(`curl -s --max-time 15 ${PROD}index.html`, { encoding: "utf8" });
-      if (html.includes("script.js?v=20261024-dirfallback-1")) {
+      if (html.includes(`script.js?v=${EXPECT_VERSION}`)) {
         console.log(`[${new Date().toISOString()}] 生产已生效（等待 ${Math.round((Date.now() - start) / 1000)}s）`);
         return true;
       }
