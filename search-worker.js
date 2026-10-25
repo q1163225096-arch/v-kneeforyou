@@ -28,7 +28,10 @@ if (typeof AbortSignal !== 'undefined') {
   }
 }
 let latest = 0;
-let base = '';
+// 分片下载源列表（主源 + 镜像）。国内直连 GitHub Pages 经常间歇性失败/极慢，
+// 多 bigram 搜索（如「2025课程与教学专题」要并发拉 10 个分片）挂一个就全盘失败；
+// jsDelivr 在国内有节点，作第二来源，主源成功时完全不碰镜像。
+let bases = [''];
 let version = '';
 let metadata;
 let directoryBits;
@@ -114,21 +117,35 @@ async function json(file, job) {
   }
   const compressed = file !== 'manifest.json' && file !== 'directories.bin';
   if (job.inflight.has(file)) return job.inflight.get(file);
-  const signal = AbortSignal.any([job.controller.signal, AbortSignal.timeout(REQUEST_TIMEOUT)]);
-  const url = `${base}/${file}${compressed ? '.gz' : ''}?v=${version}`;
   const request = (async () => {
     const disk = await getStore();
+    const urls = bases.map(b => `${b}/${file}${compressed ? '.gz' : ''}?v=${version}`);
+    // 1) 任一源的持久缓存命中就直接用（key 是完整 URL，天然按源区分）
     if (disk) {
-      try {
-        const hit = await disk.match(url);
-        if (hit) return await parsePayload(hit, file, compressed);
-      } catch (error) { /* 缓存损坏则回落到网络 */ }
+      for (const url of urls) {
+        try {
+          const hit = await disk.match(url);
+          if (hit) return await parsePayload(hit, file, compressed);
+        } catch (error) { /* 缓存损坏则回落到网络 */ }
+      }
     }
-    const response = await fetch(url, { signal });
-    if (!response.ok) throw new Error(`Search asset ${response.status}: ${file}`);
-    const buffer = await response.arrayBuffer();
-    if (disk) disk.put(url, new Response(buffer, { headers: { 'content-type': 'application/octet-stream' } })).catch(() => {});
-    return parsePayload(new Response(buffer), file, compressed);
+    // 2) 按源顺序网络拉取；当前源超时/失败才换下一个，全部失败才抛错。
+    //    搜索被 superseded/取消时直接抛，不换源重试。
+    let lastError = null;
+    for (const url of urls) {
+      const signal = AbortSignal.any([job.controller.signal, AbortSignal.timeout(REQUEST_TIMEOUT)]);
+      try {
+        const response = await fetch(url, { signal });
+        if (!response.ok) throw new Error(`Search asset ${response.status}: ${file}`);
+        const buffer = await response.arrayBuffer();
+        if (disk) disk.put(url, new Response(buffer, { headers: { 'content-type': 'application/octet-stream' } })).catch(() => {});
+        return parsePayload(new Response(buffer), file, compressed);
+      } catch (error) {
+        if (job.controller.signal.aborted) throw error;
+        lastError = error;
+      }
+    }
+    throw lastError || new Error(`Search asset unavailable: ${file}`);
   })();
   job.inflight.set(file,request);
   try {
@@ -182,7 +199,8 @@ function foldersFirst(list) {
 }
 async function search(message, job) {
   const {id,needles,type,limit,all}=message;
-  base=message.base; version=message.version;
+  bases=(message.bases&&message.bases.length)?message.bases:[message.base];
+  version=message.version;
   replacement=new RegExp(message.replacements.map(parts=>parts.join('')).join('|'),'gi');
   if(!metadata) metadata=await json('manifest.json', job);
   if(!directoryBits && type!=='all') {

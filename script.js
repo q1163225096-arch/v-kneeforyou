@@ -9,7 +9,7 @@
   // 扫完（例如「幼教」要拉 156 个分片 / 4.2MB）才肯返回，弱网下必然超时。
   // 首屏只取 80 条，剩下的走"加载更多"，分片已有缓存，后续反而更快。
   const SEARCH_FIRST_PAGE = 40;
-const CLIENT_VERSION = "20261024-selfuse-inc-1";
+const CLIENT_VERSION = "20261025-mirror-1";
   const SITE_SUBTITLE = "网课课程目录搜索";
   // 站点默认标题（initialize 里会根据 bootstrap 数据再确认一次）。
   // 与 serveStatic / Netlify Edge Function 注入的分享标题保持一致。
@@ -18,6 +18,15 @@ const CLIENT_VERSION = "20261024-selfuse-inc-1";
   const PARENT_INDEX_VERSION = "20261019-pager-1";
   const PARENT_INDEX_BUCKETS = 32;
   const ASSET_BASE = String(window.YYDOCX_ASSET_BASE || ".").replace(/\/+$/, "");
+  // 快速搜索分片的第二下载源。国内直连 GitHub Pages 经常间歇性失败/极慢，
+  // 多 bigram 搜索（如「2025课程与教学专题」要并发拉 10 个分片）只要挂一个
+  // 分片请求，整次搜索就失败并回退到已清空的慢路径 -> 用户看到"搜不到"。
+  // jsDelivr 在国内有节点，主源失败时自动切它；主源成功时完全不碰镜像。
+  // 可用 window.YYDOCX_SEARCH_MIRRORS 覆盖（自定义部署时改成自己的镜像）。
+  const SEARCH_MIRROR_BASES = (Array.isArray(window.YYDOCX_SEARCH_MIRRORS) && window.YYDOCX_SEARCH_MIRRORS.length
+    ? window.YYDOCX_SEARCH_MIRRORS
+    : ["https://cdn.jsdelivr.net/gh/q1163225096-arch/v-kneeforyou@main/data/fast-search/"]
+  ).map(b => String(b || "").trim().replace(/\/+$/, "")).filter(Boolean);
   // 搜索分片缓存版本：只在这一份倒排索引真正重建时才改，跟前端 bundle 版本无关。
   // 之前它直接复用 CLIENT_VERSION，导致每次改前端（哪怕只是加个分页按钮）bump 版本号，
   // 都会让 worker 的 Cache Storage 桶名变化、旧桶被删除 —— 用户已缓存的上百个分片全部作废，
@@ -1631,7 +1640,9 @@ function getIndexedParentFolderPath(record) {
         reject(new DOMException("Search timed out", "TimeoutError"));
       }, 47000);
       pendingFastSearch = { id, resolve, reject, timer };
-      searchWorker.postMessage({ id, base: new URL(assetUrl("data/fast-search"), location.href).href,
+      const primaryBase = new URL(assetUrl("data/fast-search"), location.href).href;
+      const bases = [primaryBase, ...SEARCH_MIRROR_BASES.map(b => new URL(b, location.href).href)];
+      searchWorker.postMessage({ id, bases,
         version: FAST_SEARCH_INDEX_VERSION, needles: searchNeedles(state.query), type: state.type,
         all: isSiteKeywordSearch(state.query), replacements: replacementParts, limit });
     });
@@ -1705,7 +1716,16 @@ function getIndexedParentFolderPath(record) {
         catch (error) {
           if (generation !== searchGeneration || error.name === "AbortError") return;
           if (error.name === "TimeoutError") throw error;
-          result = await searchStaticChunks(limit, append ? previousCount + 1 : 1, legacyController.signal);
+          // 网络类错误（国内直连 GitHub Pages 时分片拉取失败）：worker 的
+          // Cache Storage 里已缓存成功的那部分，重试一次往往只补拉失败的分片
+          // 就成了（镜像源此时也多了一次机会）。重试仍失败才走旧慢路径。
+          try {
+            result = await fastSearch(limit, null);
+          } catch (retryError) {
+            if (generation !== searchGeneration || retryError.name === "AbortError") return;
+            if (retryError.name === "TimeoutError") throw retryError;
+            result = await searchStaticChunks(limit, append ? previousCount + 1 : 1, legacyController.signal);
+          }
         }
         if (generation !== searchGeneration) return;
         state.searchResults = result.data;
