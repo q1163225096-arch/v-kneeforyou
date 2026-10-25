@@ -80,11 +80,27 @@ async function main() {
       const form=input.closest('form');
       form.requestSubmit?form.requestSubmit():form.dispatchEvent(new Event('submit',{cancelable:true}));
       return true;})()`);
-    for (let i = 0; i < 100; i++) {
-      const done = await evaluate(`((!document.querySelector('.loading-row')) && (document.querySelectorAll('.file-row').length>0 || (()=>{const e=document.querySelector('.empty-state'); return e && !e.classList.contains('is-hidden');})()))`).catch(() => false);
-      if (done) break;
-      await sleep(300);
-    }
+    // 页面内等待本次搜索真正落定。
+    // 旧实现用「!loading-row && (有 file-row 或 empty-state 可见」判定，会在 worker 尚未启动的
+    // 间隙把页面初始列表误判为搜索完成（实测抓到过 75 行初始目录 + 全 0 的假结果）。
+    // 新实现：记录提交前首行 title，要求「empty-state 可见」或「首行 title 发生变化」才算完成。
+    await evaluate(`(async()=>{
+      const before=document.querySelector('.file-row');
+      const beforeTitle=before?before.getAttribute('title'):null;
+      return await new Promise(resolve=>{
+        const t0=Date.now();
+        const iv=setInterval(()=>{
+          const loading=document.querySelector('.loading-row');
+          const rows=document.querySelectorAll('.file-row');
+          const empty=document.querySelector('.empty-state');
+          const emptyVisible=!!(empty&&!empty.classList.contains('is-hidden'));
+          const first=rows[0];
+          const firstTitle=first?first.getAttribute('title'):null;
+          const settled=!loading&&(emptyVisible||(rows.length>0&&firstTitle!==beforeTitle));
+          if(settled||Date.now()-t0>30000){clearInterval(iv);resolve(settled);}
+        },200);
+      });
+    })()`, 45000);
     await sleep(400);
     const r = await evaluate(`(async()=>{
       const rows=[...document.querySelectorAll('.file-row')];
