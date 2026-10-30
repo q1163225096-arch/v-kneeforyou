@@ -9,7 +9,7 @@
   // 扫完（例如「幼教」要拉 156 个分片 / 4.2MB）才肯返回，弱网下必然超时。
   // 首屏只取 80 条，剩下的走"加载更多"，分片已有缓存，后续反而更快。
   const SEARCH_FIRST_PAGE = 40;
-const CLIENT_VERSION = "20261030-selfuse-fix-1";
+const CLIENT_VERSION = "20261030-dirtsbackfill-1";
   const SITE_SUBTITLE = "网课课程目录搜索";
   // 站点默认标题（initialize 里会根据 bootstrap 数据再确认一次）。
   // 与 serveStatic / Netlify Edge Function 注入的分享标题保持一致。
@@ -112,7 +112,7 @@ const CLIENT_VERSION = "20261030-selfuse-fix-1";
   const parentNamesCache = new Map();
   const parentNamesLoading = new Map();
   const HISTORY_KEY = "yydocx-state-v2";
-  const CHILD_INDEX_VERSION = "20261030-selfuse-fix-1";
+  const CHILD_INDEX_VERSION = "20261030-dirtsbackfill-1";
   const selfUseBuckets = new Map();
   let searchWorker = null;
   let fastSearchPartialHandler = null;
