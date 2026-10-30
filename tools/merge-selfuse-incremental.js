@@ -26,7 +26,7 @@ const APPLY = process.argv.includes('--apply');
 const treeFile = process.argv[2];
 if (!treeFile) { console.error('用法: node tools/merge-selfuse-incremental.js <tree.txt> [--apply]'); process.exit(1); }
 
-const NEW_VERSION = '20261029-selfuse-inc-2';
+const NEW_VERSION = '20261030-selfuse-fix-1';
 
 // ============ 与 script.js / search-worker.js / rebuild-postings.mjs 同一套规则 ============
 const PLATFORM_TAGS = ['小鹅','目录','B站','CCtalk','学浪','小额','海豚','易知','人人讲','ClassIn','创客','荔枝','短书','海豚知道','伯索云','千聊','钉钉','问到','头条','易知课堂','优课','有赞'];
@@ -133,7 +133,16 @@ const newIndexRows = [];   // 7 元素索引行（追加到 r*）
 const newBucketRows = [];  // { parentId, row } 追加到父 entry
 const newEntries = [];     // { id, bucket } 新目录 entry
 let idCounter = 0;
-const nextId = () => 'u' + (++idCounter);
+let idBase = null; // 首次分配时取现有最大 u 号，避免与历史导入 id 冲突（10-29 曾因重启 u1 覆盖 10-24 条目）
+const nextId = () => {
+  if (idBase === null) {
+    let mx = 0;
+    for (const id of entries.keys()) { const m = /^u(\d+)$/.exec(id); if (m) mx = Math.max(mx, +m[1]); }
+    idBase = mx;
+    console.log(`新 id 从 u${idBase + 1} 起分配（现有最大 u 号 u${mx}）`);
+  }
+  return 'u' + (idBase + (++idCounter));
+};
 const addedPaths = new Set();
 
 function attachFile(name, parentId, parentPath) {
@@ -443,15 +452,15 @@ function bumpInFile(file, pairs) {
   fs.writeFileSync(file, s);
 }
 bumpInFile(path.join(root, 'script.js'), [
-  ['const CLIENT_VERSION = "20261025-mirror-1";', `const CLIENT_VERSION = "${NEW_VERSION}";`],
-  ['const FAST_SEARCH_INDEX_VERSION = "20261024-selfuse-inc-1";', `const FAST_SEARCH_INDEX_VERSION = "${NEW_VERSION}";`],
-  ['const CHILD_INDEX_VERSION = "20261024-selfuse-inc-1";', `const CHILD_INDEX_VERSION = "${NEW_VERSION}";`],
+  ['const CLIENT_VERSION = "20261029-selfuse-inc-2";', `const CLIENT_VERSION = "${NEW_VERSION}";`],
+  ['const FAST_SEARCH_INDEX_VERSION = "20261029-selfuse-inc-2";', `const FAST_SEARCH_INDEX_VERSION = "${NEW_VERSION}";`],
+  ['const CHILD_INDEX_VERSION = "20261029-selfuse-inc-2";', `const CHILD_INDEX_VERSION = "${NEW_VERSION}";`],
 ]);
 bumpInFile(path.join(root, 'index.html'), [
-  ['<script src="./script.js?v=20261025-mirror-1"></script>', `<script src="./script.js?v=${NEW_VERSION}"></script>`],
+  ['<script src="./script.js?v=20261029-selfuse-inc-2"></script>', `<script src="./script.js?v=${NEW_VERSION}"></script>`],
 ]);
 bumpInFile(path.join(root, 'tools/rebuild-postings.mjs'), [
-  ["const NEW_VERSION = '20261024-selfuse-inc-1';", `const NEW_VERSION = '${NEW_VERSION}';`],
+  ["const NEW_VERSION = '20261029-selfuse-inc-2';", `const NEW_VERSION = '${NEW_VERSION}';`],
 ]);
 console.log('H. 版本号: CLIENT_VERSION / FAST_SEARCH_INDEX_VERSION / CHILD_INDEX_VERSION / index.html?v= / rebuild NEW_VERSION 全部升到', NEW_VERSION);
 

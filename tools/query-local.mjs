@@ -136,7 +136,7 @@ for (const q of process.argv.slice(2)) {
     const folders = r.hits.filter(h => h.isFolder).length;
     const files = r.hits.filter(h => !h.isFolder).length;
     console.log(`${q} [${type}] needles=${JSON.stringify(r.needles)} bigram=${r.usedBigram} 候选=${r.cands} -> folders=${folders} files=${files}`);
-    if (q === '电工证' && type === 'all') {
+    if (r.hits.length) {
       for (const h of r.hits.slice(0, 10)) console.log(`    ${h.isFolder ? '[D]' : '[F]'} ${h.raw}`);
     }
   }
