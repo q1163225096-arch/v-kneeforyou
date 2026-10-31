@@ -14,7 +14,7 @@ const inDir = path.join(root, 'data/fast-search');
 const outDir = path.join(root, 'data/fast-search.new');
 fs.mkdirSync(outDir, { recursive: true });
 
-const NEW_VERSION = '20261030-selfuse-fix-1';
+const NEW_VERSION = '20261031-cache-inc-1';
 
 // ---- display-name substitutions (same as build-fast-search.js) ----
 const source = fs.readFileSync(path.join(root, 'script.js'), 'utf8');
