@@ -14,7 +14,7 @@ const inDir = path.join(root, 'data/fast-search');
 const outDir = path.join(root, 'data/fast-search.new');
 fs.mkdirSync(outDir, { recursive: true });
 
-const NEW_VERSION = '20261103-education-inc-1';
+const NEW_VERSION = '20261108-tutorial-inc-1';
 
 // ---- display-name substitutions (same as build-fast-search.js) ----
 const source = fs.readFileSync(path.join(root, 'script.js'), 'utf8');
@@ -38,8 +38,13 @@ const HASH_NUM_RE = /#[0-9]+#/g;
 const BRACKET_NUM_RE = /\[\s*[0-9]+\s*\]/g;
 const EMPTY_BRACKET_RE = /[【\[][】\]]/g;
 const LEADING_NUM_RE = /^\s*[0-9]+\s*[-_.、,，:：)\]']\s*/;
+// 括号(半角/全角)内含数字或字母(大小写) -> 括号连同内容整段剔除，不进索引
+const PAREN_DIGIT_LETTER_RE = /[（(][^（）()]*[0-9A-Za-z][^（）()]*[）)]/g;
+// 表面分辨率标识：1080P/720P/360P/480P/540P/2160P/2K/4K 等，不进索引
+const RES_RE = /\b\d{3,4}[Pp]\b|\b[24][Kk]\b/g;
 function stripIndexNoise(s) {
   let text = String(s == null ? '' : s)
+    .replace(PAREN_DIGIT_LETTER_RE, '').replace(RES_RE, '')
     .replace(BRACKET_TAG_RE, '')
     .replace(NOISE_WORD_RE, '')
     .replace(BRACE_NUM_RE, '')

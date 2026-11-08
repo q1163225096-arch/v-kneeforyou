@@ -9,7 +9,7 @@
   // 扫完（例如「幼教」要拉 156 个分片 / 4.2MB）才肯返回，弱网下必然超时。
   // 首屏只取 80 条，剩下的走"加载更多"，分片已有缓存，后续反而更快。
   const SEARCH_FIRST_PAGE = 40;
-const CLIENT_VERSION = "20261103-education-inc-1";
+const CLIENT_VERSION = "20261108-tutorial-inc-1";
   const SITE_SUBTITLE = "网课课程目录搜索";
   // 站点默认标题（initialize 里会根据 bootstrap 数据再确认一次）。
   // 与 serveStatic / Netlify Edge Function 注入的分享标题保持一致。
@@ -32,7 +32,7 @@ const CLIENT_VERSION = "20261103-education-inc-1";
   // 都会让 worker 的 Cache Storage 桶名变化、旧桶被删除 —— 用户已缓存的上百个分片全部作废，
   // 每次升级都要重新冷启动下载 ~100 个分片 / ~4MB，弱网下就是「搜索很慢 + 一直失败」。
   // 现在固定住这个值：值沿用当前线上用户缓存里已有的版本，老用户缓存可直接续用，零额外冷启动。
-  const FAST_SEARCH_INDEX_VERSION = "20261103-education-inc-1";
+  const FAST_SEARCH_INDEX_VERSION = "20261108-tutorial-inc-1";
   const SEARCH_MANIFEST_URL = `${assetUrl("data/search-manifest.json")}?v=${SEARCH_INDEX_VERSION}`;
   const SEARCH_CHUNKS_PER_PAGE = 10;
   const SEARCH_INITIAL_TIME_BUDGET_MS = 8000;
@@ -112,7 +112,7 @@ const CLIENT_VERSION = "20261103-education-inc-1";
   const parentNamesCache = new Map();
   const parentNamesLoading = new Map();
   const HISTORY_KEY = "yydocx-state-v2";
-  const CHILD_INDEX_VERSION = "20261103-education-inc-1";
+  const CHILD_INDEX_VERSION = "20261108-tutorial-inc-1";
   const selfUseBuckets = new Map();
   let searchWorker = null;
   let fastSearchPartialHandler = null;
@@ -440,8 +440,13 @@ function getIndexedParentFolderPath(record) {
   // 开头的累加编号：00_ 01_ 1_ 10_ 01. 1. 027、 1 - 等。
   // 分隔符必填，避免误伤「3D建模」「7天入门」「10分钟瘦身」这类正常开头。
   const LEADING_NUM_RE = /^\s*[0-9]+\s*[-_.、,，:：)\]']\s*/;
-  function stripIndexNoise(value) {
+  // 括号(半角/全角)内含数字或字母(大小写) -> 括号连同内容整段剔除，不进索引
+const PAREN_DIGIT_LETTER_RE = /[（(][^（）()]*[0-9A-Za-z][^（）()]*[）)]/g;
+// 表面分辨率标识：1080P/720P/360P/480P/540P/2160P/2K/4K 等，不进索引
+const RES_RE = /\b\d{3,4}[Pp]\b|\b[24][Kk]\b/g;
+function stripIndexNoise(value) {
     let text = String(value == null ? "" : value)
+      .replace(PAREN_DIGIT_LETTER_RE, "").replace(RES_RE, "")
       .replace(BRACKET_TAG_RE, "")
       .replace(NOISE_WORD_RE, "")
       .replace(BRACE_NUM_RE, "")

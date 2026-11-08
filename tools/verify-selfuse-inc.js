@@ -21,8 +21,13 @@ const check = (ok, msg) => { console.log((ok ? '  ✓ ' : '  ✗ ') + msg); if (
 // 与索引同一套噪音规则（空名/课程资料 不进 posting 也不进位图）
 const PLATFORM_TAGS = ['小鹅','目录','B站','CCtalk','学浪','小额','海豚','易知','人人讲','ClassIn','创客','荔枝','短书','海豚知道','伯索云','千聊','钉钉','问到','头条','易知课堂','优课','有赞'];
 const BRACKET_TAG_RE = new RegExp('[【\\[]\\s*(?:' + PLATFORM_TAGS.slice().sort((a,b)=>b.length-a.length).map(t=>t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|') + ')\\s*[】\\]]','gi');
+// 括号(半角/全角)内含数字或字母(大小写) -> 括号连同内容整段剔除，不进索引
+const PAREN_DIGIT_LETTER_RE = /[（(][^（）()]*[0-9A-Za-z][^（）()]*[）)]/g;
+// 表面分辨率标识：1080P/720P/360P/480P/540P/2160P/2K/4K 等，不进索引
+const RES_RE = /\b\d{3,4}[Pp]\b|\b[24][Kk]\b/g;
 function stripIndexNoise(s) {
   let t = String(s == null ? '' : s)
+    .replace(PAREN_DIGIT_LETTER_RE, '').replace(RES_RE, '')
     .replace(BRACKET_TAG_RE, '').replace(/课件|资料/g, '').replace(/\{\s*[0-9]+\s*\}/g, '')
     .replace(/#[0-9]+#/g, '').replace(/\[\s*[0-9]+\s*\]/g, '').replace(/[【\[][】\]]/g, '');
   for (let i = 0; i < 5; i++) { const n = t.replace(/^\s*[0-9]+\s*[-_.、,，:：)\]']\s*/, ''); if (n === t) break; t = n; }
