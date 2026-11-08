@@ -14,7 +14,7 @@ const inDir = path.join(root, 'data/fast-search');
 const outDir = path.join(root, 'data/fast-search.new');
 fs.mkdirSync(outDir, { recursive: true });
 
-const NEW_VERSION = '20261108-tutorial-inc-1';
+const NEW_VERSION = '20261108-paren-mixed4-1';
 
 // ---- display-name substitutions (same as build-fast-search.js) ----
 const source = fs.readFileSync(path.join(root, 'script.js'), 'utf8');
@@ -38,13 +38,13 @@ const HASH_NUM_RE = /#[0-9]+#/g;
 const BRACKET_NUM_RE = /\[\s*[0-9]+\s*\]/g;
 const EMPTY_BRACKET_RE = /[【\[][】\]]/g;
 const LEADING_NUM_RE = /^\s*[0-9]+\s*[-_.、,，:：)\]']\s*/;
-// 括号(半角/全角)内含数字或字母(大小写) -> 括号连同内容整段剔除，不进索引
-const PAREN_DIGIT_LETTER_RE = /[（(][^（）()]*[0-9A-Za-z][^（）()]*[）)]/g;
+// 括号内恰好 4 个字符且同时含数字与字母（纯数字/纯字母/含中文/长度非4 一律保留）-> 整段剔除
+const PAREN_DIGIT_LETTER_RE = /[（(]([0-9A-Za-z]{4})[）)]/g;
 // 表面分辨率标识：1080P/720P/360P/480P/540P/2160P/2K/4K 等，不进索引
 const RES_RE = /\b\d{3,4}[Pp]\b|\b[24][Kk]\b/g;
 function stripIndexNoise(s) {
   let text = String(s == null ? '' : s)
-    .replace(PAREN_DIGIT_LETTER_RE, '').replace(RES_RE, '')
+    .replace(PAREN_DIGIT_LETTER_RE, (m, g) => (/[0-9]/.test(g) && /[A-Za-z]/.test(g) ? '' : m)).replace(RES_RE, '')
     .replace(BRACKET_TAG_RE, '')
     .replace(NOISE_WORD_RE, '')
     .replace(BRACE_NUM_RE, '')
@@ -101,12 +101,26 @@ const blocks = fs.readdirSync(inDir)
   .filter(f => /^r\d{5}\.json\.gz$/.test(f))
   .sort();
 
+// 已删除课程：cleanup-classin-one.mjs 当年只清了 posting / 目录位 / 浏览 entry，
+// r 行块为了 docId 对齐仍留着原行。全量重建若照常扫描会把这些行重新写回 posting，
+// 导致已删除课程「复活」。这里把删除语义固化，重建时按路径前缀跳过（只占 docId）。
+// 以后再用 cleanup 类脚本删课，务必同步在这里登记前缀。
+const DELETED_PATH_PREFIXES = [
+  '/自用/其它/【ClassIn】27国省考导氮快申论全程班二期'
+];
+function isDeletedRow(item, local) {
+  if (!local) return false;
+  const p = String(item[6] || '');
+  return DELETED_PATH_PREFIXES.some(prefix => p === prefix || p.startsWith(prefix + '/'));
+}
+
 let excluded = 0;
 for (const f of blocks) {
   const rows = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(inDir, f))).toString());
   for (const item of rows) {
     const remote = item[0] === 1;
     const local = item[5] === 'local-self-use';
+    if (isDeletedRow(item, local)) { total++; excluded++; continue; }
     const raw = remote ? (item[1] || '') : item[0];
     const base = local ? raw : String(raw).replace(pattern, 'kneeforyou');
     // 顺序很重要：必须先 stripExt 再 stripIndexNoise。

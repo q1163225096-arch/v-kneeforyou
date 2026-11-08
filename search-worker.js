@@ -65,13 +65,13 @@ const HASH_NUM_RE = /#[0-9]+#/g;
 const BRACKET_NUM_RE = /\[\s*[0-9]+\s*\]/g;
 const EMPTY_BRACKET_RE = /[【\[][】\]]/g;
 const LEADING_NUM_RE = /^\s*[0-9]+\s*[-_.、,，:：)\]']\s*/;
-// 括号(半角/全角)内含数字或字母(大小写) -> 括号连同内容整段剔除，不进索引
-const PAREN_DIGIT_LETTER_RE = /[（(][^（）()]*[0-9A-Za-z][^（）()]*[）)]/g;
+// 括号内恰好 4 个字符且同时含数字与字母（纯数字/纯字母/含中文/长度非4 一律保留）-> 整段剔除
+const PAREN_DIGIT_LETTER_RE = /[（(]([0-9A-Za-z]{4})[）)]/g;
 // 表面分辨率标识：1080P/720P/360P/480P/540P/2160P/2K/4K 等，不进索引
 const RES_RE = /\b\d{3,4}[Pp]\b|\b[24][Kk]\b/g;
 function stripIndexNoise(value) {
   let text = String(value == null ? '' : value)
-    .replace(PAREN_DIGIT_LETTER_RE, '').replace(RES_RE, '')
+    .replace(PAREN_DIGIT_LETTER_RE, (m, g) => (/[0-9]/.test(g) && /[A-Za-z]/.test(g) ? '' : m)).replace(RES_RE, '')
     .replace(BRACKET_TAG_RE, '')
     .replace(NOISE_WORD_RE, '')
     .replace(BRACE_NUM_RE, '')

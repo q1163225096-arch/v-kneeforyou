@@ -26,7 +26,7 @@ const APPLY = process.argv.includes('--apply');
 const treeFile = process.argv[2];
 if (!treeFile) { console.error('用法: node tools/merge-selfuse-incremental.js <tree.txt> [--apply]'); process.exit(1); }
 
-const NEW_VERSION = '20261108-tutorial-inc-1';
+const NEW_VERSION = '20261108-paren-mixed4-1';
 
 // ============ 与 script.js / search-worker.js / rebuild-postings.mjs 同一套规则 ============
 const PLATFORM_TAGS = ['小鹅','目录','B站','CCtalk','学浪','小额','海豚','易知','人人讲','ClassIn','创客','荔枝','短书','海豚知道','伯索云','千聊','钉钉','问到','头条','易知课堂','优课','有赞'];
@@ -37,13 +37,13 @@ const HASH_NUM_RE = /#[0-9]+#/g;
 const BRACKET_NUM_RE = /\[\s*[0-9]+\s*\]/g;
 const EMPTY_BRACKET_RE = /[【\[][】\]]/g;
 const LEADING_NUM_RE = /^\s*[0-9]+\s*[-_.、,，:：)\]']\s*/;
-// 括号(半角/全角)内含数字或字母(大小写) -> 括号连同内容整段剔除，不进索引
-const PAREN_DIGIT_LETTER_RE = /[（(][^（）()]*[0-9A-Za-z][^（）()]*[）)]/g;
+// 括号内恰好 4 个字符且同时含数字与字母（纯数字/纯字母/含中文/长度非4 一律保留）-> 整段剔除
+const PAREN_DIGIT_LETTER_RE = /[（(]([0-9A-Za-z]{4})[）)]/g;
 // 表面分辨率标识：1080P/720P/360P/480P/540P/2160P/2K/4K 等，不进索引
 const RES_RE = /\b\d{3,4}[Pp]\b|\b[24][Kk]\b/g;
 function stripIndexNoise(s) {
   let text = String(s == null ? '' : s)
-    .replace(PAREN_DIGIT_LETTER_RE, '').replace(RES_RE, '')
+    .replace(PAREN_DIGIT_LETTER_RE, (m, g) => (/[0-9]/.test(g) && /[A-Za-z]/.test(g) ? '' : m)).replace(RES_RE, '')
     .replace(BRACKET_TAG_RE, '').replace(NOISE_WORD_RE, '').replace(BRACE_NUM_RE, '')
     .replace(HASH_NUM_RE, '').replace(BRACKET_NUM_RE, '').replace(EMPTY_BRACKET_RE, '');
   for (let i = 0; i < 5; i++) { const next = text.replace(LEADING_NUM_RE, ''); if (next === text) break; text = next; }
@@ -457,15 +457,15 @@ function bumpInFile(file, pairs) {
   fs.writeFileSync(file, s);
 }
 bumpInFile(path.join(root, 'script.js'), [
-  ['const CLIENT_VERSION = "20261103-education-inc-1";', `const CLIENT_VERSION = "${NEW_VERSION}";`],
-  ['const FAST_SEARCH_INDEX_VERSION = "20261103-education-inc-1";', `const FAST_SEARCH_INDEX_VERSION = "${NEW_VERSION}";`],
-  ['const CHILD_INDEX_VERSION = "20261103-education-inc-1";', `const CHILD_INDEX_VERSION = "${NEW_VERSION}";`],
+  ['const CLIENT_VERSION = "20261108-paren-mixed4-1";', `const CLIENT_VERSION = "${NEW_VERSION}";`],
+  ['const FAST_SEARCH_INDEX_VERSION = "20261108-paren-mixed4-1";', `const FAST_SEARCH_INDEX_VERSION = "${NEW_VERSION}";`],
+  ['const CHILD_INDEX_VERSION = "20261108-paren-mixed4-1";', `const CHILD_INDEX_VERSION = "${NEW_VERSION}";`],
 ]);
 bumpInFile(path.join(root, 'index.html'), [
-  ['<script src="./script.js?v=20261103-education-inc-1"></script>', `<script src="./script.js?v=${NEW_VERSION}"></script>`],
+  ['<script src="./script.js?v=20261108-paren-mixed4-1"></script>', `<script src="./script.js?v=${NEW_VERSION}"></script>`],
 ]);
 bumpInFile(path.join(root, 'tools/rebuild-postings.mjs'), [
-  ["const NEW_VERSION = '20261103-education-inc-1';", `const NEW_VERSION = '${NEW_VERSION}';`],
+  ["const NEW_VERSION = '20261108-paren-mixed4-1';", `const NEW_VERSION = '${NEW_VERSION}';`],
 ]);
 console.log('H. 版本号: CLIENT_VERSION / FAST_SEARCH_INDEX_VERSION / CHILD_INDEX_VERSION / index.html?v= / rebuild NEW_VERSION 全部升到', NEW_VERSION);
 
