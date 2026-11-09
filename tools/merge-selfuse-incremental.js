@@ -26,7 +26,7 @@ const APPLY = process.argv.includes('--apply');
 const treeFile = process.argv[2];
 if (!treeFile) { console.error('用法: node tools/merge-selfuse-incremental.js <tree.txt> [--apply]'); process.exit(1); }
 
-const NEW_VERSION = '20261108-paren-mixed4-1';
+const NEW_VERSION = '20261109-xingjiaren-1';
 
 // ============ 与 script.js / search-worker.js / rebuild-postings.mjs 同一套规则 ============
 const PLATFORM_TAGS = ['小鹅','目录','B站','CCtalk','学浪','小额','海豚','易知','人人讲','ClassIn','创客','荔枝','短书','海豚知道','伯索云','千聊','钉钉','问到','头条','易知课堂','优课','有赞'];
