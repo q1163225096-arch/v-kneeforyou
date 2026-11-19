@@ -36,8 +36,13 @@ async function waitForProd(maxMs = 8 * 60 * 1000) {
   return false;
 }
 
-const edge = spawn(EDGE, ["--headless=new", "--disable-gpu", "--no-sandbox",
-  "--remote-allow-origins=*", `--remote-debugging-port=${PORT}`, "about:blank"], { stdio: "ignore" });
+// 允许用 EDGE_PROFILE 指定独立 profile：默认 profile 里残留的 scope=current 等
+// localStorage 状态会把生产查询全部过滤成 0，造成假失败。
+const edgeArgs = ["--headless=new", "--disable-gpu", "--no-sandbox", "--remote-allow-origins=*",
+  `--remote-debugging-port=${PORT}`];
+if (process.env.EDGE_PROFILE) edgeArgs.push(`--user-data-dir=${process.env.EDGE_PROFILE}`);
+edgeArgs.push("about:blank");
+const edge = spawn(EDGE, edgeArgs, { stdio: "ignore" });
 
 let ws, msgId = 0;
 const pending = new Map();

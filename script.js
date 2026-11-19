@@ -9,7 +9,7 @@
   // 扫完（例如「幼教」要拉 156 个分片 / 4.2MB）才肯返回，弱网下必然超时。
   // 首屏只取 80 条，剩下的走"加载更多"，分片已有缓存，后续反而更快。
   const SEARCH_FIRST_PAGE = 40;
-const CLIENT_VERSION = "20261119-tutorial-inc-1";
+const CLIENT_VERSION = "20261119-browse-retry-1";
   const SITE_SUBTITLE = "网课课程目录搜索";
   // 站点默认标题（initialize 里会根据 bootstrap 数据再确认一次）。
   // 与 serveStatic / Netlify Edge Function 注入的分享标题保持一致。
@@ -145,10 +145,22 @@ const CLIENT_VERSION = "20261119-tutorial-inc-1";
     }
   }
 
-  function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+  function fetchWithTimeout(url, options = {}, timeoutMs = 45000) {
     const timeout = AbortSignal.timeout(timeoutMs);
     const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
     return fetch(url, { ...options, signal });
+  }
+
+  // 手机 4G / 微信内置浏览器访问 GitHub Pages 波动大：单个 self-use 桶 200~450KB，
+  // 旧版 15s 超时经常被误判成「目录索引加载失败」，一次抖动就让目录在本次会话里打不开。
+  // 浏览层关键资源（child-index / 桶）改为长超时 + 重试一次，失败才真正报错。
+  async function fetchWithRetry(url, options = {}, timeoutMs = 45000, retries = 1) {
+    let lastError;
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      try { return await fetchWithTimeout(url, options, timeoutMs); }
+      catch (error) { lastError = error; }
+    }
+    throw lastError;
   }
 
   function cancelSearch() {
@@ -346,7 +358,7 @@ function getIndexedParentFolderPath(record) {
     if (childFiles[key]) return childFiles[key];
     const file = childIndexFile(key);
     if (!childIndexCache.has(file)) {
-      const response = await fetchWithTimeout(`${assetUrl(`data/child-index/${file}`)}?v=${CHILD_INDEX_VERSION}`);
+      const response = await fetchWithRetry(`${assetUrl(`data/child-index/${file}`)}?v=${CHILD_INDEX_VERSION}`);
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
       const json = await response.json();
       childIndexCache.set(file, json && typeof json === "object" ? json : {});
@@ -1172,7 +1184,7 @@ function stripIndexNoise(value) {
   }
 
   async function fetchBucketFile(file) {
-    const response = await fetchWithTimeout(`${assetUrl(`data/${file}`)}?v=${CHILD_INDEX_VERSION}`);
+    const response = await fetchWithRetry(`${assetUrl(`data/${file}`)}?v=${CHILD_INDEX_VERSION}`);
     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
     if (file.endsWith(".gz")) {
       const bytes = new Uint8Array(await response.arrayBuffer());
@@ -1223,7 +1235,7 @@ function stripIndexNoise(value) {
               catch (error) { selfUseBuckets.delete(childFile); throw error; }
               if (!json) throw new Error("Imported directory missing");
             } else {
-              const response = await fetchWithTimeout(assetUrl(`data/${childFile}`));
+              const response = await fetchWithRetry(assetUrl(`data/${childFile}`));
               if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
               json = await response.json();
             }
