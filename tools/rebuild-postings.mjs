@@ -14,7 +14,7 @@ const inDir = path.join(root, 'data/fast-search');
 const outDir = path.join(root, 'data/fast-search.new');
 fs.mkdirSync(outDir, { recursive: true });
 
-const NEW_VERSION = '20261125-tutorial-inc-1';
+const NEW_VERSION = '20261125-nosingle-1';
 
 // ---- display-name substitutions (same as build-fast-search.js) ----
 const source = fs.readFileSync(path.join(root, 'script.js'), 'utf8');
@@ -138,7 +138,10 @@ for (const f of blocks) {
     }
 
     const chars = Array.from(name);
-    const tokens = new Set(chars.map(c => 'c' + c));
+    // 只建 bigram（b+双字），不再建单字 token（c+单字）：
+    // 单字 posting 占近半倒排条目和 113MB，且查询侧 bigram 优先，单字几乎不走。
+    // 查询侧字符级回退仍保留：bigram 缺失时会拿不到 c-token，自然退化为全库扫描兜底。
+    const tokens = new Set();
     for (let i = 0; i + 1 < chars.length; i++) tokens.add('b' + chars[i] + chars[i + 1]);
     for (const token of tokens) {
       let list = postings.get(token);

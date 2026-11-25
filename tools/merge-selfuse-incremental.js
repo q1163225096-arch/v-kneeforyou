@@ -205,7 +205,8 @@ function buildPostings(baseTotal) {
     if (EXCLUDE.has(name) || !name) { excludedRows++; return; }
     if (isDir) newDirCount++; else newFileCount++;
     const chars = Array.from(name);
-    const tokens = new Set(chars.map(c => 'c' + c));
+    // 只建 bigram，不建单字 token（与 rebuild-postings.mjs 一致）
+    const tokens = new Set();
     for (let j = 0; j + 1 < chars.length; j++) tokens.add('b' + chars[j] + chars[j + 1]);
     for (const token of tokens) {
       let list = postings.get(token);

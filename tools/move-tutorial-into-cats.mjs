@@ -61,7 +61,7 @@ function tokensOf(name, isDir) {
   const n = normalize(stripIndexNoise(isDir ? String(name) : stripExt(name)));
   if (!n || EXCLUDE.has(n)) return [];
   const chars = Array.from(n);
-  const tokens = new Set(chars.map(c => 'c' + c));
+  const tokens = new Set();
   for (let j = 0; j + 1 < chars.length; j++) tokens.add('b' + chars[j] + chars[j + 1]);
   return [...tokens];
 }

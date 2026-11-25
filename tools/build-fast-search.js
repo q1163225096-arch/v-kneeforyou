@@ -135,7 +135,7 @@ for (let ci=0;ci<manifest.chunks.length;ci++) {
     const raw = remote ? item[1]||'' : item[0];
     const name = normalize(stripIndexNoise(local?raw:String(raw).replace(pattern,'kneeforyou')));
     const chars = Array.from(name);
-    const tokens = new Set(chars.map(c=>'c'+c));
+    const tokens = new Set();
     for(let i=0;i+1<chars.length;i++) tokens.add('b'+chars[i]+chars[i+1]);
     for(const token of tokens) {
       let list=postings.get(token);

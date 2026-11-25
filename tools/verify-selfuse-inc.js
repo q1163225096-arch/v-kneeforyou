@@ -142,7 +142,7 @@ let strongOk = true, strongChecked = 0, strongTokens = 0;
 for (const { row, docId } of picked) {
   const name = normalize(stripIndexNoise(stripExt(row[0])));
   const chars = Array.from(name);
-  const tokens = new Set(chars.map(c => 'c' + c));
+  const tokens = new Set();
   for (let j = 0; j + 1 < chars.length; j++) tokens.add('b' + chars[j] + chars[j + 1]);
   for (const token of tokens) {
     strongTokens++;

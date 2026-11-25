@@ -24,7 +24,7 @@ const stripIndexNoise = new Function(stripBody + '; return stripIndexNoise;')();
 const normalize = s => String(s || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 function tokensOf(name) {
   const chars = Array.from(normalize(stripIndexNoise(name)));
-  const out = new Set(chars.map(c => 'c' + c));
+  const out = new Set();
   for (let i = 0; i + 1 < chars.length; i++) out.add('b' + chars[i] + chars[i + 1]);
   return out;
 }
